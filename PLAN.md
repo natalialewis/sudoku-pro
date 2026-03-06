@@ -413,4 +413,4 @@ This will:
 - Strategy detection runs in real-time as user enters values
 - Hint system has three layers: strategy type → unit → exact value
 - Tutor mode uses hybrid approach: fixed intro problems, then adaptive selection
-- GitHub Actions workflow is disabled during development (`disabled-migrate.yml`) - rename to `migrate.yml` when deploying to public Supabase
+- GitHub Actions automatic workflow is disabled during development - remove the current "on" section in migrate.yml with the commented out code when ready to start the workflow again.
