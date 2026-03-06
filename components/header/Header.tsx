@@ -16,13 +16,13 @@ export function Header() {
           className="flex items-center gap-2 rounded font-semibold text-foreground hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           <Image
-            src="/logo.png"
+            src="/logo.svg"
             alt=""
-            width={40}
-            height={40}
-            className="h-10 w-10 shrink-0 rounded-full"
+            width={32}
+            height={32}
+            className="h-8 w-8 shrink-0"
           />
-          <span>Starter App</span>
+          <span>Sudoku Pro</span>
         </Link>
 
         {/* Auth and theme toggle */}
