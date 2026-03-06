@@ -1,177 +1,412 @@
-# Next.js + Supabase Starter App — Implementation Plan
+# Sudoku Tutor Implementation Plan
 
-This document is the implementation plan for the assignment. Save it as a markdown file in the project root (e.g. **PLAN.md** or **ASSIGNMENT_PLAN.md**).
+## Overview
 
-**Decisions:** Tailwind CSS (plain CSS only when needed), Jest for unit tests, bash setup script (`setup.sh`), Vercel as primary deployment target, Supabase Storage for avatar uploads. Route/component names are flexible; keep them consistent and documented.
+Transform my existing Next.js + Supabase starter app into an intelligent Sudoku tutor that teaches explicit logical strategies using Bayesian Knowledge Tracing (BKT), constraint-based modeling, and rule-based strategy detection.
 
----
+## Architecture Overview
 
-## 1. Next.js application (already partially done)
+```mermaid
+flowchart TB
+    User[User] --> Auth[Authentication]
+    Auth --> Strategies[Strategies Mode]
+    Auth --> Tutor[Tutor Mode]
+    Auth --> Play[Play Mode]
+    
+    Strategies --> StaticPages[Static Strategy Pages]
+    
+    Tutor --> BKT[BKT Engine]
+    Tutor --> MiniBoards[Mini Board Problems]
+    BKT --> DB[(Supabase DB)]
+    MiniBoards --> DB
+    
+    Play --> FullBoards[Full Sudoku Boards]
+    Play --> ConstraintChecker[Constraint Checker]
+    Play --> StrategyDetector[Strategy Detector]
+    Play --> HintSystem[Hint System]
+    
+    ConstraintChecker --> Feedback[Feedback Engine]
+    StrategyDetector --> Feedback
+    HintSystem --> Feedback
+    
+    BKT --> Probabilities[BKT Probabilities]
+    Probabilities --> DB
+```
 
-- **Status:** Project exists with Next.js 16, TypeScript, Tailwind 4, App Router ([app/](app/)).
-- **Remaining:** Confirm project structure and add folders: `components/` (e.g. `components/ui/` for reusable UI), `lib/` (Supabase clients, hooks, utils). Document structure in README.
-- **Styling:** Use Tailwind primarily; add plain CSS only when necessary (e.g. one-off overrides). No CSS modules.
+## Database Schema
 
----
+### 1. Boards Table (`supabase/migrations/create_boards.sql`)
 
-## 2. Supabase integration
+Store pre-generated boards (full and mini) with metadata:
 
-- **Install:** Supabase CLI (dev), `@supabase/supabase-js` and `@supabase/ssr`. Initialize Supabase in repo: `npx supabase init` to create `supabase/` (config, migrations).
-- **Local dev:** Use `npx supabase start` for local Supabase; document Docker requirement in README.
-- **Client utilities (using @supabase/ssr):**
-- **Server:** e.g. `lib/supabase/server.ts` — create Supabase client for server components (cookies).
-- **Client:** e.g. `lib/supabase/client.ts` — create browser client for client components.
-- **Middleware + proxy:** Implement token refresh:
-- Put session refresh / proxy logic in **`proxy.ts`** at the root; Document which paths are safe from redirect to login in README.
-- **Env:** Require `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `.env.local`. Document in README; ensure `.env.local` is in `.gitignore` (already covered by [.gitignore](.gitignore) `.env*`).
+```sql
+CREATE TABLE boards (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    board_type TEXT NOT NULL CHECK (board_type IN ('full', 'mini')),
+    difficulty TEXT CHECK (difficulty IN ('easy', 'medium', 'hard')),
+    strategy_focus TEXT CHECK (strategy_focus IN ('naked_single', 'hidden_single', 'naked_pair', 'hidden_pair', NULL)),
+    initial_state JSONB NOT NULL, -- 9x9 grid: [[0-9, ...], ...] where 0 = empty
+    solution JSONB NOT NULL -- Complete solution
+);
 
----
+CREATE INDEX idx_boards_type ON boards(board_type);
+CREATE INDEX idx_boards_strategy ON boards(strategy_focus);
+CREATE INDEX idx_boards_difficulty ON boards(difficulty);
+```
 
-## 3. Profile model (declarative schema and migrations)
+### 2. BKT Probabilities Table (`supabase/migrations/create_bkt_probabilities.sql`)
 
-- **Declarative schema:** Create `supabase/schemas/profiles.sql` defining a `profiles` table:
-- `id` UUID PRIMARY KEY REFERENCES `auth.users(id)` ON DELETE CASCADE
-- `email` (from auth), `full_name`, `avatar_url`, `updated_at` (or similar)
-- No trigger in the declarative file; triggers go in migrations.
-- **Migration from schema:** Run `npx supabase db diff -f create_profiles` (or similar) to generate a migration from the declarative schema. Commit under `supabase/migrations/`.
-- **updated_at trigger:** Add a migration (or extend the same one) that creates a trigger to set `profiles.updated_at` on row update (e.g. `BEFORE UPDATE ... SET updated_at = now()`).
-- **Automatic profile creation:** Add a migration that:
-- Creates a function that runs AFTER INSERT on `auth.users`, reads `NEW.id` and `NEW.email`, and INSERTs one row into `profiles`.
-- Creates a trigger: `AFTER INSERT ON auth.users FOR EACH ROW EXECUTE ...`
-- Puts both function and trigger in the migration file.
+Store mastery probabilities per user per knowledge component:
 
-All schema changes only via migration files; no manual SQL execution.
+```sql
+CREATE TABLE bkt_probabilities (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    knowledge_component TEXT NOT NULL CHECK (knowledge_component IN ('naked_single', 'hidden_single', 'naked_pair', 'hidden_pair')),
+    p_learned DECIMAL(5,4) NOT NULL DEFAULT 0.1, -- p(L0) - initial probability
+    p_transit DECIMAL(5,4) NOT NULL DEFAULT 0.3, -- p(T) - probability of learning
+    p_guess DECIMAL(5,4) NOT NULL DEFAULT 0.1, -- p(G) - probability of guessing correctly
+    p_slip DECIMAL(5,4) NOT NULL DEFAULT 0.05, -- p(S) - probability of slipping
+    mastery_probability DECIMAL(5,4) NOT NULL DEFAULT 0.1, -- Current P(L|obs)
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, knowledge_component)
+);
 
----
+CREATE INDEX idx_bkt_user ON bkt_probabilities(user_id);
+CREATE INDEX idx_bkt_kc ON bkt_probabilities(knowledge_component);
+```
 
-## 4. Row Level Security (RLS)
+## Core Game Logic
 
-- **Enable RLS** on `profiles` in a migration.
-- **Policies** using `auth.uid()`:
-- SELECT: user can read only their own row (`id = auth.uid()`).
-- UPDATE: user can update only their own row.
-- INSERT: user can insert only their own row (id = auth.uid()).
-- Ensure no policy allows reading or modifying other users' profiles.
+### 1. Sudoku Engine (`lib/sudoku/`)
 
----
+#### `lib/sudoku/types.ts`
 
-## 5. Authentication
+- Define `Board` type (9x9 grid: `number[][]`)
+- Define `Cell` type with position and value
+- Define `Strategy` enum/types
 
-- **Implement:** Sign up, sign in, sign out (email/password) using Supabase Auth.
-- **Patterns:**
-- **Client:** e.g. `useAuth()` (or `useUser()`) in `lib/hooks/` that exposes user and auth actions; use in client components.
-- **Server:** e.g. `getUser()` or `getSession()` in `lib/supabase/` that server components and Server Actions call to check auth.
-- **Protected routes:** For dashboard and profile, check auth server-side (or in middleware); redirect to login if unauthenticated.
-- **Display user info:** Show user/email (and profile data where relevant) on home, dashboard, and profile when logged in.
-- **Errors:** Handle failed sign up/sign in (e.g. invalid credentials, rate limit) and show clear messages in the UI.
+#### `lib/sudoku/constraints.ts`
 
----
+- `checkRowConstraint(board, row, col, value)`: Check if value violates row constraint
+- `checkColumnConstraint(board, row, col, value)`: Check if value violates column constraint
+- `checkBoxConstraint(board, row, col, value)`: Check if value violates 3x3 box constraint
+- `isValidMove(board, row, col, value)`: Check all constraints
+- `getBoxIndex(row, col)`: Get 3x3 box index (0-8)
 
-## 6. Example pages
+#### `lib/sudoku/candidates.ts`
 
-Use a consistent naming scheme (e.g. `/login`, `/signup`, `/dashboard`, `/profile` or `/auth/login`, `/account`, etc.) and document it in README.
+- `getCandidates(board, row, col)`: Get possible values for a cell
+- `getAllCandidates(board)`: Get candidates for all empty cells
 
-| Route | Purpose |
-|-------|--------|
-| **/** | Home: welcome message, auth status; link to login/signup when logged out, to dashboard when logged in. |
-| **/login** | Email and password login form; error handling; redirect to dashboard on success. |
-| **/signup** | Email and password signup form; error handling; redirect to dashboard on success. |
-| **/dashboard** | Protected. Require auth (redirect to login otherwise). Show profile summary, link to profile page, sign out button. |
-| **/profile** | Protected. Require auth. Show current profile; form to update `full_name` (and any other profile fields); **avatar upload** (select file, upload to Supabase Storage, update `avatar_url`, display avatar, save button); error handling for upload and validation. |
+#### `lib/sudoku/strategies.ts`
 
-For avatar upload: create a Supabase Storage bucket (e.g. `avatars`), set RLS so users can read/update only their own object (e.g. by path or user id). Update `profiles.avatar_url` with the public or signed URL.
+- `detectNakedSingle(board, row, col)`: Detect if cell has only one candidate
+- `detectHiddenSingle(board, row, col, value)`: Detect if value can only go in one cell in unit
+- `detectNakedPair(board, unit)`: Detect if two cells share exactly two candidates
+- `detectHiddenPair(board, unit)`: Detect if two numbers can only appear in two cells
+- `detectStrategyUsed(board, row, col, value)`: Main function to detect which strategy was applied
 
----
+#### `lib/sudoku/boardGenerator.ts`
 
-## 7. Setup script (bash)
+- `generateFullBoard(difficulty)`: Generate complete solvable Sudoku board
+- `generateMiniBoard(strategy)`: Generate 9x9 board with minimal clues for specific strategy
+- `validateBoard(board)`: Ensure board has unique solution
+- `removeClues(board, count)`: Remove clues to create puzzle (for difficulty levels)
 
-- **File:** `setup.sh` in project root; make executable (`chmod +x setup.sh`).
-- **Assumptions:** Supabase already initialized (`supabase/` with migrations and schemas exists). Idempotent and safe to run multiple times.
-- **Steps in order:**
+#### `lib/sudoku/solver.ts`
 
-1. `npm install`
-2. Start Supabase: `npx supabase start` (detect if already running and skip or continue).
-3. Extract from `supabase start` output: Supabase URL and anon key (e.g. grep/sed or parse the printed table).
-4. Create or update `.env.local` with `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-5. Run migrations: `npx supabase db reset` or `npx supabase migration up`.
-6. Print clear summary of what was done and next steps (e.g. "Run `npm run dev`").
+- `solveBoard(board)`: Backtracking solver (for validation)
+- `hasUniqueSolution(board)`: Check if board has exactly one solution
 
-- **Edge cases:** If `.env.local` exists, overwrite or prompt; if Supabase is already running, avoid duplicate start; on failure, print helpful error messages.
-- **README:** Document how to run the script (e.g. `./setup.sh`) and prerequisites (Node, Docker), plus troubleshooting.
+### 2. BKT Implementation (`lib/bkt/`)
 
----
+#### `lib/bkt/types.ts`
 
-## 8. Code organization and documentation
+- Define BKT parameters interface
+- Define knowledge component types
 
-- **Decide and document in README:**
-- Reusable components: e.g. `components/` or `components/ui/`.
-- Custom hooks: e.g. `lib/hooks/`.
-- Utility functions: e.g. `lib/utils/`.
-- Supabase helpers: `lib/supabase/`.
-- **README sections to include:** Project description and purpose; prerequisites (Node version, Docker); quick start (setup script); manual setup (step-by-step); project structure; how to use this starter for new projects; environment variables; database schema overview; authentication flow; deployment (Vercel-focused); GitHub Actions; troubleshooting.
+#### `lib/bkt/engine.ts`
 
----
+- `updateBKT(priorProb, pTransit, pGuess, pSlip, correct, usedHint)`: Update mastery probability
+- `getNextProblem(userId, kc)`: Select next problem based on mastery probabilities
+- `shouldShowHint(masteryProb)`: Determine hint level based on mastery
 
-## 9. Unit testing (Jest)
+#### `lib/bkt/hooks.ts`
 
-- **Setup:** Add Jest and React Testing Library (and any Jest env for Next/React if needed). Configure for TypeScript (e.g. ts-jest or project references). Add `test` script in [package.json](package.json).
-- **Examples:** At least a few tests demonstrating:
-- React component tests (e.g. a button or a small form).
-- Utility function tests.
-- Auth-related code (e.g. a helper that returns user or null).
-- **README:** How to run tests (`npm test`) and how to add new tests (where to put them, pattern to follow).
+- `useBKT(userId)`: React hook to fetch/update BKT probabilities
+- `useUpdateBKT()`: Hook to update BKT after move
 
----
+#### Event-Based BKT Update Flow
 
-## 10. Deployment (Vercel) and CI/CD
+- BKT is updated **event-by-event**, rather than storing full game sessions or move histories.
+- When the learner completes a relevant action (for example, applies a strategy correctly in Tutor mode or makes a key move in Play mode), the UI calls a server-side function with:
+  - The knowledge component (strategy) being targeted.
+  - Whether the response was correct or incorrect.
+  - Whether hints were used (and how strong they were).
+- The server updates the learner’s `bkt_probabilities` row for that knowledge component and returns the new mastery value (used internally to select future problems and hints).
+- Full move histories are not persisted; only the aggregated mastery probabilities are stored to save space and keep the model simple.
 
-- **Deployment docs (README):**
-- Create/link production Supabase project; get production URL and anon key.
-- In Vercel: new project from repo; set env vars (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`); link production database.
-- Platform notes: Vercel env dashboard, no commit of `.env.local`, optional serverless/Edge notes if relevant.
-- **GitHub Actions workflow:** e.g. `.github/workflows/migrate.yml`:
-- Trigger: push to `main` (or deployment to production).
-- Job: checkout, set up Node (if needed for CLI), run Supabase migrations against production using Supabase CLI and credentials from GitHub Secrets (e.g. `SUPABASE_DB_URL` or project ref + access token as per Supabase docs).
-- On failure: clear error message; do not expose secrets.
-- **README:** How to set up and configure the workflow (which secrets to add, where to find them in Supabase dashboard).
+### 3. Hint System (`lib/hints/`)
 
----
+#### `lib/hints/generator.ts`
 
-## 11. Submission checklist
+- `generateHint(board, targetCell, strategy, level)`: Generate hint based on level
+  - Level 1: Strategy type hint ("Try using Naked Single")
+  - Level 2: Unit hint ("Look at row 3")
+  - Level 3: Exact value hint ("Cell (3,5) should be 7")
 
-- Remove `node_modules`; keep `supabase/` (migrations and schemas).
-- Ensure `setup.sh` is included and executable.
-- Verify README is comprehensive and clear.
-- Zip project folder and submit.
+## API Routes & Server Actions
 
----
+### `app/api/boards/route.ts`
 
-## Suggested implementation order
+- `GET /api/boards?type=full&difficulty=easy`: Fetch boards by criteria.
+- `GET /api/boards/[id]`: Fetch specific board.
 
-1. Supabase init, client utilities, env, middleware + proxy.
-2. Declarative schema and migrations (profiles table, updated_at trigger, auto profile trigger).
-3. RLS on profiles.
-4. Auth: sign up, sign in, sign out; server/client helpers and protected route checks.
-5. Pages: home, login, signup, dashboard, profile (with avatar upload and Storage).
-6. Setup script (`setup.sh`).
-7. Jest setup and example tests.
-8. README (all sections) and deployment + GitHub Actions docs.
-9. Final test: remove `node_modules` and `.env.local`, run `./setup.sh`, then run app and verify flows.
+### `app/api/bkt/route.ts`
 
----
+- `GET /api/bkt`: Get the current user's BKT probabilities for all strategies (used internally).
+- `POST /api/bkt/update`: Update BKT after a learner action. Request body includes:
+  - `knowledge_component`
+  - `correct` (boolean)
+  - `used_hint` / hint level information.
 
-## File and folder reference (summary)
+### Server Actions (`app/actions/`)
 
-| Item | Location / note |
-|------|------------------|
-| Supabase config & migrations | `supabase/` (init then add migrations) |
-| Declarative schema | `supabase/schemas/profiles.sql` |
-| Server client | e.g. `lib/supabase/server.ts` |
-| Browser client | e.g. `lib/supabase/client.ts` |
-| Token refresh logic | `proxy.ts` (then used in middleware) |
-| Middleware | `middleware.ts` (root) |
-| Auth hook | e.g. `lib/hooks/useAuth.ts` |
-| Reusable UI | e.g. `components/` or `components/ui/` |
-| Setup script | `setup.sh` (root) |
-| GitHub Actions | `.github/workflows/migrate.yml` |
-| Plan document | Save this content as `PLAN.md` (or `ASSIGNMENT_PLAN.md`) in project root |
+- `submitTutorStep(params)`: For Tutor mode.
+  - Validates the learner's response for the targeted strategy.
+  - Determines correctness and hint usage.
+  - Calls the BKT update function.
+  - Returns the next tutor step (info screen, mini board, or strategy-identification task).
+- `submitPlayMove(params)`: For Play mode.
+  - Validates a move against Sudoku constraints and available strategies.
+  - Optionally updates BKT if the move clearly reflects a targeted strategy.
+- `updateBKT(userId, kc, correct, usedHint)`: Core helper used by both Tutor and Play flows.
+
+## UI Components
+
+### 1. Shared Components (`components/sudoku/`)
+
+#### `components/sudoku/Board.tsx`
+
+- Render 9x9 grid
+- Handle cell input
+- Visual feedback (correct/incorrect, hints)
+- Highlight units (row/column/box) on hover
+
+#### `components/sudoku/Cell.tsx`
+
+- Individual cell component
+- Editable/read-only states
+- Visual states (initial clue, user input, correct, incorrect, hint)
+
+#### `components/sudoku/StrategyIndicator.tsx`
+
+- Show detected strategy when user makes move
+- Visual feedback for strategy application
+
+#### `components/sudoku/HintButton.tsx`
+
+- Request hint button
+- Show hint level indicator
+
+### 2. Strategies Mode (`app/strategies/`)
+
+#### `app/strategies/page.tsx`
+
+- List of all four strategies
+- Links to individual strategy pages
+
+#### `app/strategies/[strategy]/page.tsx`
+
+- Static explanation page for each strategy
+- Example board visualization
+- Step-by-step explanation
+- Interactive example (optional)
+
+### 3. Tutor Mode (`app/tutor/`)
+
+#### `app/tutor/page.tsx`
+
+- Main tutor interface
+- Show current problem (mini board)
+- Progress indicator (mastery probabilities)
+- Strategy explanation panel
+- Next problem button (adaptive selection)
+
+#### `app/tutor/components/ProblemDisplay.tsx`
+
+- Display current mini board
+- Show strategy focus
+- Explanation text
+
+#### `app/tutor/components/ProgressPanel.tsx`
+
+- Display BKT mastery probabilities for each KC
+- Visual progress bars
+
+### 4. Play Mode (`app/play/`)
+
+#### `app/play/page.tsx`
+
+- Board selection (difficulty)
+- Full Sudoku board interface
+- Move history
+- Hint system
+- Strategy detection feedback
+
+#### `app/play/components/GameControls.tsx`
+
+- Difficulty selector
+- New game button
+- Undo/redo (optional)
+- Hint button
+
+#### `app/play/components/FeedbackPanel.tsx`
+
+- Show constraint violations
+- Show strategy-specific feedback
+- Show detected strategy
+
+## Board Generation Script
+
+### `scripts/generateBoards.ts`
+
+- Generate and store boards in database
+- Generate full boards (easy: ~35 clues, medium: ~28 clues, hard: ~22 clues)
+- Generate mini boards for each strategy (minimal clues to demonstrate strategy)
+- Validate uniqueness before storing
+- Run via: `npm run generate-boards` or `tsx scripts/generateBoards.ts`
+
+## Setup and Prerequisites
+
+### Local Development Setup
+
+Before starting implementation, run the setup script from the starter app to initialize local Supabase:
+
+```bash
+chmod +x setup.sh   # only needed once
+./setup.sh
+```
+
+This will:
+- Install dependencies (`npm install`)
+- Start local Supabase instance (requires Docker)
+- Create `.env.local` with Supabase credentials
+- Run all migrations including existing starter app migrations
+
+**Note:** The GitHub Actions workflow file is currently renamed to `disabled-migrate.yml` to prevent running migrations against a public Supabase instance during development. When ready to deploy to production/public Supabase, rename it back to `migrate.yml` (see "Deployment" section below).
+
+## Implementation Order
+
+1. **Database Schema** (Migrations)
+
+   - Create boards table (without `created_at` timestamp)
+   - Create BKT probabilities table
+   - (No separate `game_sessions` table; BKT is updated event-by-event)
+   - Add RLS policies
+
+2. **Core Sudoku Logic**
+
+   - Types and constraints
+   - Strategy detection algorithms
+   - Board generator (basic)
+   - Solver/validator
+
+3. **BKT Implementation**
+
+   - BKT engine
+   - Database integration
+   - React hooks
+
+4. **Board Generation**
+
+   - Script to generate initial boards
+   - Store in database
+
+5. **API Routes & Server Actions**
+
+   - Board retrieval
+   - Per-event BKT update API
+   - Tutor step submission
+   - Play move validation (with optional BKT updates)
+
+6. **UI Components**
+
+   - Board component
+   - Cell component
+   - Basic styling
+
+7. **Strategies Mode**
+
+   - Static pages for each strategy
+   - Example visualizations
+
+8. **Tutor Mode**
+
+   - Problem display
+   - BKT-driven problem selection
+   - Progress tracking
+
+9. **Play Mode**
+
+   - Full board interface
+   - Constraint checking
+   - Strategy detection feedback
+   - Hint system
+
+10. **Polish & Testing**
+
+    - Error handling
+    - Loading states
+    - Responsive design
+    - Edge cases
+
+11. **Deployment to Public Supabase**
+
+    - Set up production Supabase project
+    - Configure environment variables in Vercel
+    - Rename `.github/workflows/disabled-migrate.yml` back to `.github/workflows/migrate.yml`
+    - Configure GitHub Secrets (SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF, SUPABASE_DB_PASSWORD)
+    - Test migration workflow
+
+## Key Files to Create/Modify
+
+### New Files
+
+- `supabase/migrations/[timestamp]_create_boards.sql`
+- `supabase/migrations/[timestamp]_create_bkt_probabilities.sql`
+- `lib/sudoku/types.ts`
+- `lib/sudoku/constraints.ts`
+- `lib/sudoku/candidates.ts`
+- `lib/sudoku/strategies.ts`
+- `lib/sudoku/boardGenerator.ts`
+- `lib/sudoku/solver.ts`
+- `lib/bkt/types.ts`
+- `lib/bkt/engine.ts`
+- `lib/bkt/hooks.ts`
+- `lib/hints/generator.ts`
+- `app/strategies/page.tsx`
+- `app/strategies/[strategy]/page.tsx`
+- `app/tutor/page.tsx`
+- `app/play/page.tsx`
+- `components/sudoku/Board.tsx`
+- `components/sudoku/Cell.tsx`
+- `scripts/generateBoards.ts`
+
+### Modified Files
+
+- `app/page.tsx` - Update home page with navigation to three modes
+- `app/layout.tsx` - Update metadata
+- `proxy.ts` - Add new routes to public routes if needed
+- `package.json` - Add any additional dependencies
+
+## Notes
+
+- BKT probabilities are stored per user per knowledge component, not per move
+- Boards are pre-generated and stored, not generated on-the-fly
+- Mini boards are full 9x9 grids with minimal clues focused on specific strategies
+- Strategy detection runs in real-time as user enters values
+- Hint system has three layers: strategy type → unit → exact value
+- Tutor mode uses hybrid approach: fixed intro problems, then adaptive selection
+- GitHub Actions workflow is disabled during development (`disabled-migrate.yml`) - rename to `migrate.yml` when deploying to public Supabase
