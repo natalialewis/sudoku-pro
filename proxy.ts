@@ -24,13 +24,16 @@ export async function proxy(request: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser();
     const pathname = request.nextUrl.pathname;
 
-    // Public routes are '/', '/login', and '/signup'
-    const isPublicRoute = 
+    // Public routes: home, auth, strategies, tutor, play (no redirect to login)
+    const isPublicRoute =
         pathname === "/" ||
-        pathname === "/login" ||
-        pathname === "/signup";
+        pathname.startsWith("/login") ||
+        pathname.startsWith("/signup") ||
+        pathname.startsWith("/strategies") ||
+        pathname.startsWith("/tutor") ||
+        pathname.startsWith("/play");
 
-    // If the user is not on a public route and not authenticated, redirect to '/login'
+    // Only redirect to login for protected routes (e.g. profile, settings)
     if (!isPublicRoute && !user) {
         return NextResponse.redirect(new URL("/login", request.url));
     }
