@@ -48,7 +48,7 @@ describe("useSignUp", () => {
         data: { first_name: "Jane", last_name: "Doe" },
       },
     });
-    expect(mockPush).toHaveBeenCalledWith("/dashboard");
+    expect(mockPush).toHaveBeenCalledWith("/");
   });
 
   it("sets error on failed signup", async () => {

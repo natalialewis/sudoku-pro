@@ -35,8 +35,8 @@ export function useSignUp() {
         },
       });
       if (signUpError) throw signUpError;
-      // When the user signs up successfully, they are redirected to the dashboard
-      router.push("/dashboard");
+      // When the user signs up successfully, they are redirected to home
+      router.push("/");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
