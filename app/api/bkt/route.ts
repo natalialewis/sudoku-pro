@@ -26,6 +26,26 @@ export async function GET() {
   return NextResponse.json({ probabilities: data ?? [] });
 }
 
+/** DELETE /api/bkt - Delete all BKT rows for the current user (reset mastery). */
+export async function DELETE() {
+  const user = await getUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const supabase = await createSupabaseClient();
+  const { error } = await supabase
+    .from("bkt_probabilities")
+    .delete()
+    .eq("user_id", user.id);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
 /** POST /api/bkt - Record an observation and update mastery. */
 export async function POST(request: Request) {
   const user = await getUser();
