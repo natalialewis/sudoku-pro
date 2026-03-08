@@ -24,6 +24,19 @@ FOR SELECT
 TO authenticated
 USING ((select auth.uid()) = user_id);
 
+CREATE POLICY "BKT probabilities are insertable by the owner"
+ON bkt_probabilities
+FOR INSERT
+TO authenticated
+WITH CHECK (((select auth.uid()) = user_id));
+
+CREATE POLICY "BKT probabilities are updatable by the owner"
+ON bkt_probabilities
+FOR UPDATE
+TO authenticated
+USING ((select auth.uid()) = user_id)
+WITH CHECK (((select auth.uid()) = user_id));
+
 -- Trigger to update the updated_at column
 CREATE TRIGGER set_updated_at_bkt
 BEFORE UPDATE ON bkt_probabilities
