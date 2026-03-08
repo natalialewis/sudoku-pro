@@ -1,8 +1,9 @@
 import { getUser } from "@/lib/auth";
 import { LoginBanner } from "./components/LoginBanner";
+import { PlayGame } from "./components/PlayGame";
 
 export default async function PlayPage() {
-  // Determine if the user is logged in
+  // Check if the user is authenticated
   const user = await getUser();
 
   return (
@@ -14,9 +15,7 @@ export default async function PlayPage() {
         <p className="mt-2 text-muted-foreground">
           Play full Sudoku puzzles. Choose a difficulty, get hints, and see which strategies you use as you solve.
         </p>
-        <p className="mt-4 text-sm text-muted-foreground">
-          Board selection and game interface will be implemented here.
-        </p>
+        <PlayGame />
       </main>
     </div>
   );
