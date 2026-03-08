@@ -1,7 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { NakedSinglePage } from "../components/NakedSinglePage";
+import { HiddenSinglePage } from "../components/HiddenSinglePage";
+import { NakedPairPage } from "../components/NakedPairPage";
+import { HiddenPairPage } from "../components/HiddenPairPage";
 
 const VALID_STRATEGIES = ["naked_single", "hidden_single", "naked_pair", "hidden_pair"] as const;
+
+// Map strategy slugs to human-readable names
 const STRATEGY_NAMES: Record<(typeof VALID_STRATEGIES)[number], string> = {
   naked_single: "Naked Single",
   hidden_single: "Hidden Single",
@@ -9,13 +15,25 @@ const STRATEGY_NAMES: Record<(typeof VALID_STRATEGIES)[number], string> = {
   hidden_pair: "Hidden Pair",
 };
 
+// Define page component mapping
 type Props = { params: Promise<{ strategy: string }> };
+function StrategyContent({ slug }: { slug: string }) {
+  if (slug === "naked_single") return <NakedSinglePage />;
+  if (slug === "hidden_single") return <HiddenSinglePage />;
+  if (slug === "naked_pair") return <NakedPairPage />;
+  if (slug === "hidden_pair") return <HiddenPairPage />;
+  return null;
+}
 
+// Main page component
 export default async function StrategyPage({ params }: Props) {
   const { strategy: slug } = await params;
+
+  // Validate strategy slug
   if (!VALID_STRATEGIES.includes(slug as (typeof VALID_STRATEGIES)[number])) {
     notFound();
   }
+
   const name = STRATEGY_NAMES[slug as (typeof VALID_STRATEGIES)[number]];
 
   return (
@@ -34,9 +52,9 @@ export default async function StrategyPage({ params }: Props) {
           </Link>
         </div>
         <h1 className="text-2xl font-semibold text-foreground">{name}</h1>
-        <p className="mt-2 text-muted-foreground">
-          Explanation and examples for this strategy will go here.
-        </p>
+        <div className="mt-6">
+          <StrategyContent slug={slug} />
+        </div>
       </main>
     </div>
   );
