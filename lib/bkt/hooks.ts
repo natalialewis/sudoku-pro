@@ -64,7 +64,7 @@ export function useBKT() {
   const getMastery = useCallback(
     (kc: Strategy): number => {
       const row = probabilities.find((p) => p.knowledge_component === kc);
-      return row ? Number(row.mastery_probability) : 0.1; // default p_learned
+      return row ? Number(row.mastery_probability) : 0.05; // default p_learned
     },
     [probabilities]
   );

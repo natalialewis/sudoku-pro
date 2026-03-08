@@ -20,10 +20,10 @@ export interface BKTProbabilityRow extends BKTParams {
   updated_at: string;
 }
 
-/** Default BKT parameters (Corbett & Anderson typical values). These are constants for a given knowledge component. */
+/** Default BKT parameters. p_guess high / p_transit low so mastery takes ~5× longer (~75+ correct). */
 export const DEFAULT_BKT_PARAMS: BKTParams = {
-  p_learned: 0.1,
-  p_transit: 0.3,
-  p_guess: 0.1,
+  p_learned: 0.05,
+  p_transit: 0.02,
+  p_guess: 0.4,
   p_slip: 0.05,
 };
