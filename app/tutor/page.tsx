@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getUser } from "@/lib/auth";
+import { TutorMode } from "./components/TutorMode";
 
 export default async function TutorPage() {
   const user = await getUser();
@@ -30,18 +31,13 @@ export default async function TutorPage() {
                 </Link>
               </div>
             </div>
-            <p className="mt-6 text-sm text-muted-foreground">
-              Tutor logic and problem selection will be implemented here. Sign in to get adaptive practice.
-            </p>
           </>
         ) : (
           <>
             <p className="mt-2 text-muted-foreground">
               Practice with adaptive mini-board problems. The tutor will pick problems based on your mastery of each strategy.
             </p>
-            <p className="mt-4 text-sm text-muted-foreground">
-              Tutor logic and problem selection will be implemented here.
-            </p>
+            <TutorMode />
           </>
         )}
       </main>
