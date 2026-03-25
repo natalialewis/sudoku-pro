@@ -53,14 +53,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { knowledge_component: Strategy; correct: boolean; used_hint?: boolean };
+  let body: {
+    knowledge_component: Strategy;
+    correct: boolean;
+    used_hint?: boolean;
+    update_strength?: number;
+  };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { knowledge_component, correct, used_hint = false } = body;
+  const {
+    knowledge_component,
+    correct,
+    used_hint = false,
+    update_strength = 1,
+  } = body;
   if (!knowledge_component || typeof correct !== "boolean") {
     return NextResponse.json(
       { error: "knowledge_component and correct are required" },
@@ -71,6 +81,14 @@ export async function POST(request: Request) {
   const valid = ["naked_single", "hidden_single", "naked_pair", "hidden_pair"] as const;
   if (!valid.includes(knowledge_component)) {
     return NextResponse.json({ error: "Invalid knowledge_component" }, { status: 400 });
+  }
+  if (
+    typeof update_strength !== "number" ||
+    Number.isNaN(update_strength) ||
+    update_strength < 0 ||
+    update_strength > 1
+  ) {
+    return NextResponse.json({ error: "Invalid update_strength" }, { status: 400 });
   }
 
   const supabase = await createSupabaseClient();
@@ -98,7 +116,8 @@ export async function POST(request: Request) {
   };
 
   const priorProb = existing ? Number(existing.mastery_probability) : DEFAULT_BKT_PARAMS.p_learned;
-  const newMastery = updateBKT(priorProb, params, correct, used_hint);
+  const fullUpdateMastery = updateBKT(priorProb, params, correct, used_hint);
+  const newMastery = priorProb + (fullUpdateMastery - priorProb) * update_strength;
 
   if (existing) {
     const { data: updated, error: updateError } = await supabase
