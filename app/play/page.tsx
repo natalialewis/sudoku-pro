@@ -13,9 +13,9 @@ export default async function PlayPage() {
         {!user && <LoginBanner />}
         <h1 className="text-2xl font-semibold text-foreground">Play</h1>
         <p className="mt-2 text-muted-foreground">
-          Play full Sudoku puzzles. Choose a difficulty, get hints, and see which strategies you use as you solve.
+          Play full Sudoku puzzles. Choose a difficulty, get hints, and practice the strategies you have learned in a real game!
         </p>
-        <PlayGame />
+        <PlayGame isLoggedIn={!!user} />
       </main>
     </div>
   );
