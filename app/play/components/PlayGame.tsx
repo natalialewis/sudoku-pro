@@ -79,7 +79,11 @@ function fireWinConfetti() {
 }
 
 // Main component that renders the game.
-export function PlayGame() {
+interface PlayGameProps {
+  isLoggedIn?: boolean;
+}
+
+export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
   const [initial, setInitial] = useState<Board | null>(null);
   const [solution, setSolution] = useState<Board | null>(null);
@@ -95,6 +99,27 @@ export function PlayGame() {
   const [won, setWon] = useState(false);
   const confettiFiredRef = useRef(false);
   const hintTargetRef = useRef<{ row: number; col: number; value: number; strategy: "naked_single" | "hidden_single" } | null>(null);
+
+  // Record lightweight BKT evidence in play mode for logged-in users.
+  const recordPlayObservation = useCallback(
+    async (strategy: "naked_single" | "hidden_single", correct: boolean) => {
+      if (!isLoggedIn) return;
+      try {
+        await fetch("/api/bkt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            knowledge_component: strategy,
+            correct,
+            update_strength: 0.05, // 1/20th of tutor-mode update strength
+          }),
+        });
+      } catch {
+        // Ignore network/auth failures so play mode stays responsive for guests.
+      }
+    },
+    [isLoggedIn]
+  );
 
   // Start a new game. Set all states to the initial values and generate a new puzzle.
   const startNewGame = useCallback(async () => {
@@ -280,6 +305,10 @@ export function PlayGame() {
         return;
       }
 
+      const boardBeforeMove = board.map((r) => [...r]);
+      boardBeforeMove[row][col] = 0;
+      const strategyForCell = detectStrategyUsed(boardBeforeMove, row, col, solution[row][col]);
+
       // If the user entered a value that violates a constraint (Sudoku rule), show a banner explaining the constraint violation.
       const constraint = getViolatedConstraint(board, row, col, digit);
       if (constraint) {
@@ -293,6 +322,9 @@ export function PlayGame() {
         setBanner({
           message: constraintMessage(digit, constraint, row, col),
         });
+        if (strategyForCell === "naked_single" || strategyForCell === "hidden_single") {
+          void recordPlayObservation(strategyForCell, false);
+        }
         return;
       }
 
@@ -312,6 +344,9 @@ export function PlayGame() {
         });
         setHintTier(0);
         hintTargetRef.current = null;
+        if (strategyForCell === "naked_single" || strategyForCell === "hidden_single") {
+          void recordPlayObservation(strategyForCell, true);
+        }
       } else {
         setCellError({ row, col });
         setBoard((prev) => {
@@ -320,9 +355,10 @@ export function PlayGame() {
           next[row][col] = digit;
           return next;
         });
-        const boardBeforeMove = board.map((r) => [...r]);
-        boardBeforeMove[row][col] = 0;
-        const strategy = detectStrategyUsed(boardBeforeMove, row, col, correct);
+        const strategy = strategyForCell;
+        if (strategy === "naked_single" || strategy === "hidden_single") {
+          void recordPlayObservation(strategy, false);
+        }
         if (strategy === "naked_single" || strategy === "hidden_single") {
           setBanner({
             message: strategyMessage(digit, strategy),
@@ -334,7 +370,7 @@ export function PlayGame() {
         }
       }
     },
-    [board, solution, selectedCell, candidatesMode, banner]
+    [board, solution, selectedCell, candidatesMode, banner, recordPlayObservation]
   );
 
   useEffect(() => {
