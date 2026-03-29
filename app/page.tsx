@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { getUser } from "@/lib/auth";
 
+function formatGreetingName(raw: string | undefined | null): string {
+  const s = (typeof raw === "string" ? raw.trim() : "") || "back";
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
 export default async function HomePage() {
   const user = await getUser();
 
@@ -8,7 +13,7 @@ export default async function HomePage() {
     <div className="min-h-full bg-background px-4 py-8 sm:py-10 md:py-12">
       <main className="mx-auto w-full max-w-2xl text-center">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-          Welcome{user ? `, ${user.user_metadata?.first_name ?? "back"}` : ""}!
+          Welcome{user ? `, ${formatGreetingName(user.user_metadata?.first_name)}` : ""}!
         </h1>
         <p className="mt-4 text-base text-muted-foreground sm:mt-6 sm:text-lg">
           Sudoku Pro helps you learn and practice logical solving strategies.
