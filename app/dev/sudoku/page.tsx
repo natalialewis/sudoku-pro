@@ -11,7 +11,7 @@ import {
   type Difficulty,
   type MiniBoardDifficulty,
 } from "@/lib/sudoku";
-import { createSupabaseClient } from "@/lib/supabase/client";
+import { fetchRandomFullBoard, fetchRandomMiniBoardPreview } from "@/lib/boards";
 import { StaticBoard } from "@/components/ui/StaticBoard";
 
 // Counts clues in a board (rough estimate of difficulty)
@@ -95,19 +95,7 @@ export default function DevSudokuPage() {
           label: `Full board (${difficulty}) [functions] — ${countClues(initial)} clues`,
         });
       } else {
-        const supabase = createSupabaseClient();
-        const { data, error: fetchError } = await supabase
-          .from("boards")
-          .select("initial_state, solution")
-          .eq("board_type", "full")
-          .eq("difficulty", difficulty)
-          .limit(10);
-        if (fetchError) throw new Error(fetchError.message);
-        const rows = data ?? [];
-        if (rows.length === 0) throw new Error(`No ${difficulty} full boards in database`);
-        const board = rows[Math.floor(Math.random() * rows.length)]!;
-        const initial = board.initial_state as Board;
-        const solution = board.solution as Board;
+        const { initial, solution } = await fetchRandomFullBoard(difficulty);
         setResult({
           initial,
           solution,
@@ -138,23 +126,16 @@ export default function DevSudokuPage() {
           label: `Mini (${strategy}) difficulty ${miniDifficulty}/10 [functions] — ${countClues(res.initial)} clues`,
         });
       } else {
-        const supabase = createSupabaseClient();
-        const { data, error: fetchError } = await supabase
-          .from("boards")
-          .select("initial_state, solution")
-          .eq("board_type", "mini")
-          .eq("strategy_focus", strategy)
-          .eq("difficulty_level", miniDifficulty)
-          .limit(10);
-        if (fetchError) throw new Error(fetchError.message);
-        const rows = data ?? [];
-        if (rows.length === 0) throw new Error(`No ${strategy} L${miniDifficulty} boards in database`);
-        const board = rows[Math.floor(Math.random() * rows.length)]!;
-        const initial = board.initial_state as Board;
-        const solution = board.solution as Board;
+        const { initial, solution, initialNotes, answer } = await fetchRandomMiniBoardPreview(
+          strategy,
+          miniDifficulty
+        );
         setResult({
           initial,
           solution,
+          notes: initialNotes ?? undefined,
+          answer: answer ?? undefined,
+          answerLabel: answer ? getMiniAnswerLabel(answer) : undefined,
           label: `Mini (${strategy}) difficulty ${miniDifficulty}/10 [database] — ${countClues(initial)} clues`,
         });
       }

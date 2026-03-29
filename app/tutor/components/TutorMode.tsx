@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useBKT } from "@/lib/bkt/hooks";
 import { pickNextKC, shouldShowIntro, TUTOR_STRATEGIES } from "@/lib/tutor/selection";
 import { fetchRandomMiniBoard } from "@/lib/boards";
+import { STRATEGY_LABELS } from "@/lib/sudoku";
 import type { Strategy } from "@/lib/sudoku/types";
 import type { NotesGrid } from "@/components/ui/StaticBoard";
 import { IntroSlide } from "./IntroSlide";
@@ -16,13 +17,6 @@ import {
 } from "./MultipleChoiceQuestion";
 
 type QuestionType = "solve" | "multiple_choice";
-
-const STRATEGY_DISPLAY: Record<Strategy, string> = {
-  naked_single: "Naked Single",
-  hidden_single: "Hidden Single",
-  naked_pair: "Naked Pair",
-  hidden_pair: "Hidden Pair",
-};
 
 type MiniBoardState =
   | {
@@ -187,7 +181,7 @@ export function TutorMode() {
   }
 
   if (questionType === "solve") {
-    const practiceLabel = STRATEGY_DISPLAY[currentKC];
+    const practiceLabel = STRATEGY_LABELS[currentKC];
     if (miniBoard.kind === "single") {
       return (
         <div className="mt-6 space-y-4">
@@ -214,7 +208,7 @@ export function TutorMode() {
           initial={miniBoard.initial}
           notes={miniBoard.initialNotes}
           answerCells={miniBoard.answerCells}
-          strategyLabel={STRATEGY_DISPLAY[miniBoard.strategy]}
+          strategyLabel={STRATEGY_LABELS[miniBoard.strategy]}
           onResult={handleSolveResult}
           onAdvance={handleAdvance}
         />

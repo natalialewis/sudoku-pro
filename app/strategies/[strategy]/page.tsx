@@ -4,16 +4,10 @@ import { NakedSinglePage } from "../components/NakedSinglePage";
 import { HiddenSinglePage } from "../components/HiddenSinglePage";
 import { NakedPairPage } from "../components/NakedPairPage";
 import { HiddenPairPage } from "../components/HiddenPairPage";
+import { STRATEGY_LABELS } from "@/lib/sudoku";
+import type { Strategy } from "@/lib/sudoku/types";
 
 const VALID_STRATEGIES = ["naked_single", "hidden_single", "naked_pair", "hidden_pair"] as const;
-
-// Map strategy slugs to human-readable names
-const STRATEGY_NAMES: Record<(typeof VALID_STRATEGIES)[number], string> = {
-  naked_single: "Naked Single",
-  hidden_single: "Hidden Single",
-  naked_pair: "Naked Pair",
-  hidden_pair: "Hidden Pair",
-};
 
 // Define page component mapping
 type Props = { params: Promise<{ strategy: string }> };
@@ -34,7 +28,7 @@ export default async function StrategyPage({ params }: Props) {
     notFound();
   }
 
-  const name = STRATEGY_NAMES[slug as (typeof VALID_STRATEGIES)[number]];
+  const name = STRATEGY_LABELS[slug as Strategy];
 
   return (
     <div className="min-h-full bg-background px-4 py-6 sm:px-6 md:py-8">

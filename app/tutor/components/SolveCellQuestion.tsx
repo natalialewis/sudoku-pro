@@ -4,48 +4,14 @@ import { useState, useCallback, useEffect } from "react";
 import confetti from "canvas-confetti";
 import type { Board, Strategy } from "@/lib/sudoku/types";
 import {
-  checkRowConstraint,
-  checkColumnConstraint,
-  checkBoxConstraint,
   detectStrategyUsed,
+  getViolatedConstraint,
+  constraintViolationMessage,
+  STRATEGY_LABELS,
 } from "@/lib/sudoku";
 
-type ConstraintType = "row" | "column" | "box";
-
-function getViolatedConstraint(
-  board: Board,
-  row: number,
-  col: number,
-  value: number
-): ConstraintType | null {
-  if (checkRowConstraint(board, row, col, value)) return "row";
-  if (checkColumnConstraint(board, row, col, value)) return "column";
-  if (checkBoxConstraint(board, row, col, value)) return "box";
-  return null;
-}
-
-function constraintMessage(value: number, constraint: ConstraintType): string {
-  switch (constraint) {
-    case "row":
-      return `You entered ${value}, but there is already a ${value} in that cell's row.`;
-    case "column":
-      return `You entered ${value}, but there is already a ${value} in that cell's column.`;
-    case "box":
-      return `You entered ${value}, but there is already a ${value} in that cell's 3×3 box.`;
-    default:
-      return `You entered ${value}, but it's incorrect.`;
-  }
-}
-
-const STRATEGY_NAMES: Record<Strategy, string> = {
-  naked_single: "Naked Single",
-  hidden_single: "Hidden Single",
-  naked_pair: "Naked Pair",
-  hidden_pair: "Hidden Pair",
-};
-
 function strategyMessage(value: number, strategy: Strategy): string {
-  const name = STRATEGY_NAMES[strategy];
+  const name = STRATEGY_LABELS[strategy];
   return `You entered ${value}, but it's incorrect. Use the ${name} strategy to solve this cell.`;
 }
 
@@ -95,7 +61,7 @@ export function SolveCellQuestion({
 
       const constraint = getViolatedConstraint(board, answerRow, answerCol, digit);
       if (constraint) {
-        setBanner(constraintMessage(digit, constraint));
+        setBanner(constraintViolationMessage(digit, constraint));
         setBoard((prev) => {
           const next = prev.map((r) => [...r]);
           next[answerRow][answerCol] = digit;

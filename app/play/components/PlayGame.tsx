@@ -6,9 +6,6 @@ import {
   type Board,
   type Difficulty,
   type PairHint,
-  checkRowConstraint,
-  checkColumnConstraint,
-  checkBoxConstraint,
   getAllCandidates,
   detectStrategyUsed,
   findFirstNakedSingle,
@@ -17,57 +14,16 @@ import {
   findFirstHiddenPair,
   getBoxName,
   getBoxIndex,
+  getViolatedConstraint,
+  constraintViolationMessage,
+  STRATEGY_LABELS,
 } from "@/lib/sudoku";
 import { fetchRandomFullBoard } from "@/lib/boards";
 import type { Strategy } from "@/lib/sudoku/types";
 
-type ConstraintType = "row" | "column" | "box";
-
-// If the user enters a value that violates a constraint (Sudoku rule), return the type of constraint violated.
-function getViolatedConstraint(
-  board: Board,
-  row: number,
-  col: number,
-  value: number
-): ConstraintType | null {
-  if (checkRowConstraint(board, row, col, value)) return "row";
-  if (checkColumnConstraint(board, row, col, value)) return "column";
-  if (checkBoxConstraint(board, row, col, value)) return "box";
-  return null;
-}
-
-// If the user enters a value that violates a constraint (Sudoku rule), return a message explaining the constraint violation.
-function constraintMessage(
-  value: number,
-  constraint: ConstraintType,
-  row: number,
-  col: number
-): string {
-  const humanRow = row + 1;
-  const humanCol = col + 1;
-  switch (constraint) {
-    case "row":
-      return `You entered ${value}, but there is already a ${value} in that cell's row.`;
-    case "column":
-      return `You entered ${value}, but there is already a ${value} in that cell's column.`;
-    case "box":
-      return `You entered ${value}, but there is already a ${value} in that cell's 3×3 box.`;
-    // They essentially guessed.
-    default:
-      return `You entered ${value}, but it's incorrect. Try looking for strategies and minimize guessing.`;
-  }
-}
-
-const STRATEGY_NAMES: Record<Strategy, string> = {
-  naked_single: "Naked Single",
-  hidden_single: "Hidden Single",
-  naked_pair: "Naked Pair",
-  hidden_pair: "Hidden Pair",
-};
-
 // If the user didn't violate a constraint, but entered a value that is incorrect and there is a strategy that would fill that cell, return a message explaining what strategy to use.
 function strategyMessage(value: number, strategy: Strategy): string {
-  const name = STRATEGY_NAMES[strategy];
+  const name = STRATEGY_LABELS[strategy];
   return `You entered ${value}, but it's incorrect. Use the ${name} strategy to solve this cell.`;
 }
 
@@ -402,7 +358,7 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
           return next;
         });
         setBanner({
-          message: constraintMessage(digit, constraint, row, col),
+          message: constraintViolationMessage(digit, constraint),
         });
         if (strategyForCell) {
           void recordPlayObservation(strategyForCell, false);

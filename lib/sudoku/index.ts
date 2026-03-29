@@ -1,5 +1,7 @@
 export * from "./types";
 export * from "./constraints";
+export * from "./constraintViolation";
+export { STRATEGY_LABELS } from "./strategyLabels";
 export * from "./candidates";
 export * from "./strategies";
 export * from "./exampleFinder";

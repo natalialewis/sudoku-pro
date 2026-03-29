@@ -208,15 +208,6 @@ export function findFirstHiddenSingle(board: Board): StrategyHint | null {
   return null;
 }
 
-/** Find first strategy hint (singles first, then pairs). */
-export function findFirstStrategy(board: Board): StrategyHint | null {
-  const naked = findFirstNakedSingle(board);
-  if (naked) return naked;
-  const hidden = findFirstHiddenSingle(board);
-  if (hidden) return hidden;
-  return null;
-}
-
 const BOX_NAMES: Record<number, string> = {
   0: "top-left",
   1: "top-center",

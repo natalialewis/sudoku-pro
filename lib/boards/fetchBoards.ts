@@ -63,11 +63,64 @@ function parseNotesGrid(raw: unknown): NotesGrid | null {
   }) as NotesGrid;
 }
 
+function tryParseNotesGrid(raw: unknown): NotesGrid | null {
+  try {
+    return parseNotesGrid(raw);
+  } catch {
+    return null;
+  }
+}
+
+function tryParseMiniAnswer(raw: unknown): MiniSingleAnswer | MiniPairAnswer | null {
+  if (raw == null) return null;
+  try {
+    return parseMiniAnswer(raw);
+  } catch {
+    return null;
+  }
+}
+
+type MiniBoardRow = {
+  initial_state: unknown;
+  solution: unknown;
+  initial_notes: unknown;
+  mini_answer: unknown;
+};
+
+async function fetchMiniBoardRows(
+  strategy: Strategy,
+  difficultyLevel: number,
+  options: { requireMiniAnswer: boolean }
+): Promise<MiniBoardRow[]> {
+  const supabase = createSupabaseClient();
+  let q = supabase
+    .from("boards")
+    .select("initial_state, solution, initial_notes, mini_answer")
+    .eq("board_type", "mini")
+    .eq("strategy_focus", strategy)
+    .eq("difficulty_level", difficultyLevel)
+    .limit(80);
+  if (options.requireMiniAnswer) {
+    q = q.not("mini_answer", "is", null);
+  }
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  return (data ?? []) as MiniBoardRow[];
+}
+
 export type MiniBoardFromDb = {
   initial: Board;
   solution: Board;
   initialNotes: NotesGrid | null;
   answer: MiniSingleAnswer | MiniPairAnswer;
+};
+
+/** Dev / inspection: mini row from DB with optional or invalid `mini_answer` / `initial_notes`. */
+export type MiniBoardFromDbPreview = {
+  initial: Board;
+  solution: Board;
+  initialNotes: NotesGrid | null;
+  answer: MiniSingleAnswer | MiniPairAnswer | null;
 };
 
 /**
@@ -77,18 +130,9 @@ export async function fetchRandomMiniBoard(
   strategy: Strategy,
   difficultyLevel: number
 ): Promise<MiniBoardFromDb> {
-  const supabase = createSupabaseClient();
-  const { data, error } = await supabase
-    .from("boards")
-    .select("initial_state, solution, initial_notes, mini_answer")
-    .eq("board_type", "mini")
-    .eq("strategy_focus", strategy)
-    .eq("difficulty_level", difficultyLevel)
-    .not("mini_answer", "is", null)
-    .limit(80);
+  const data = await fetchMiniBoardRows(strategy, difficultyLevel, { requireMiniAnswer: true });
 
-  if (error) throw new Error(error.message);
-  if (!data?.length) {
+  if (!data.length) {
     throw new Error(
       `No mini boards found for ${strategy} at level ${difficultyLevel}. Seed the boards table (see scripts/seedBoards.ts) and ensure mini_answer is stored.`
     );
@@ -103,6 +147,30 @@ export async function fetchRandomMiniBoard(
   if (answer.kind === "pair" && !initialNotes) {
     throw new Error("Pair mini board in database is missing initial_notes");
   }
+
+  return { initial, solution, initialNotes, answer };
+}
+
+/**
+ * Random mini board for dev tools: does not require `mini_answer`; parses optional fields leniently.
+ */
+export async function fetchRandomMiniBoardPreview(
+  strategy: Strategy,
+  difficultyLevel: number
+): Promise<MiniBoardFromDbPreview> {
+  const data = await fetchMiniBoardRows(strategy, difficultyLevel, { requireMiniAnswer: false });
+
+  if (!data.length) {
+    throw new Error(
+      `No mini boards found for ${strategy} at level ${difficultyLevel} in database.`
+    );
+  }
+
+  const row = data[Math.floor(Math.random() * data.length)]!;
+  const initial = asBoard(row.initial_state);
+  const solution = asBoard(row.solution);
+  const initialNotes = tryParseNotesGrid(row.initial_notes);
+  const answer = tryParseMiniAnswer(row.mini_answer);
 
   return { initial, solution, initialNotes, answer };
 }
