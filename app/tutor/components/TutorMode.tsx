@@ -186,9 +186,8 @@ export function TutorMode() {
     );
   }
 
-  const practiceLabel = STRATEGY_DISPLAY[currentKC];
-
   if (questionType === "solve") {
+    const practiceLabel = STRATEGY_DISPLAY[currentKC];
     if (miniBoard.kind === "single") {
       return (
         <div className="mt-6 space-y-4">
@@ -226,7 +225,6 @@ export function TutorMode() {
   if (miniBoard.kind === "single") {
     return (
       <div className="mt-6 space-y-4">
-        <p className="text-sm font-medium text-foreground">Practice: {practiceLabel}</p>
         <MultipleChoiceQuestion
           key={advanceKey}
           board={miniBoard.initial}
@@ -250,7 +248,6 @@ export function TutorMode() {
 
   return (
     <div className="mt-6 space-y-4">
-      <p className="text-sm font-medium text-foreground">Practice: {practiceLabel}</p>
       <MultipleChoiceQuestion
         key={advanceKey}
         board={miniBoard.initial}
