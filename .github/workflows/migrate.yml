@@ -4,13 +4,13 @@
 
 name: Database Migrations
 
-# on:
-#   push:
-#     branches: [main]
-
-# temporarily set to workflow dispatch while I do local development
 on:
-  workflow_dispatch:
+  push:
+    branches: [main]
+
+# # temporarily set to workflow dispatch while I do local development
+# on:
+#   workflow_dispatch:
 
 jobs:
   migrate:
