@@ -8,10 +8,6 @@ on:
   push:
     branches: [main]
 
-# # temporarily set to workflow dispatch while I do local development
-# on:
-#   workflow_dispatch:
-
 jobs:
   migrate:
     runs-on: ubuntu-latest
@@ -26,7 +22,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v1
+        uses: supabase/setup-cli@v2
         with:
           version: latest
 
