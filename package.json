@@ -10,7 +10,8 @@
     "lint": "eslint",
     "test": "jest",
     "test:watch": "jest --watch",
-    "seed:boards": "tsx scripts/seedBoards.ts"
+    "seed:boards": "tsx scripts/seedBoards.ts",
+    "keepalive:supabase": "tsx scripts/supabaseKeepalive.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.8.0",
