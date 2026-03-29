@@ -1,8 +1,13 @@
 import type { Strategy } from "@/lib/sudoku/types";
 import type { BKTProbabilityRow } from "@/lib/bkt/types";
 
-/** Strategies we have questions for (naked_single, hidden_single only for now). */
-export const TUTOR_STRATEGIES: Strategy[] = ["naked_single", "hidden_single"];
+/** Strategies with tutor practice questions. */
+export const TUTOR_STRATEGIES: Strategy[] = [
+  "naked_single",
+  "hidden_single",
+  "naked_pair",
+  "hidden_pair",
+];
 
 /** Default mastery when no row exists (same as p_learned). */
 const DEFAULT_MASTERY = 0.05;

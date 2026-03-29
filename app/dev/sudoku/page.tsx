@@ -6,11 +6,13 @@ import {
   generateMiniBoardByStrategy,
   type Board,
   type Strategy,
+  type MiniBoardResult,
   STRATEGIES,
   type Difficulty,
   type MiniBoardDifficulty,
 } from "@/lib/sudoku";
 import { createSupabaseClient } from "@/lib/supabase/client";
+import { StaticBoard } from "@/components/ui/StaticBoard";
 
 // Counts clues in a board (rough estimate of difficulty)
 function countClues(board: Board): number {
@@ -50,12 +52,33 @@ function BoardGrid({ board, label }: { board: Board; label: string }) {
 type BoardSource = "functions" | "database";
 
 // Main page component
+function getMiniAnswerLabel(answer: MiniBoardResult["answer"]): string {
+  if (answer.kind === "single") {
+    return `single: row ${answer.row + 1}, col ${answer.col + 1}, value ${answer.value}`;
+  }
+  const [a, b] = answer.cells;
+  return `pair: (${a.row + 1},${a.col + 1}) and (${b.row + 1},${b.col + 1}) on digits {${answer.digits[0]}, ${answer.digits[1]}} in ${answer.unit.type} ${answer.unit.index + 1}`;
+}
+
+function getPairCells(answer?: MiniBoardResult["answer"]) {
+  if (!answer || answer.kind !== "pair") return undefined;
+  return answer.cells.map((c) => ({ row: c.row, col: c.col }));
+}
+
+function getStrongDigits(answer?: MiniBoardResult["answer"]) {
+  if (!answer || answer.kind !== "pair") return undefined;
+  return answer.cells.map((c) => ({ row: c.row, col: c.col, digits: answer.digits }));
+}
+
 export default function DevSudokuPage() {
   const [source, setSource] = useState<BoardSource>("functions");
   const [result, setResult] = useState<{
     initial: Board;
     solution: Board;
     label: string;
+    notes?: number[][][];
+    answerLabel?: string;
+    answer?: MiniBoardResult["answer"];
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -106,11 +129,12 @@ export default function DevSudokuPage() {
     try {
       if (source === "functions") {
         const res = generateMiniBoardByStrategy(strategy, miniDifficulty);
-        const solution = res.initial.map((row) => [...row]);
-        solution[res.answer.row][res.answer.col] = res.answer.value;
         setResult({
           initial: res.initial,
-          solution,
+          solution: res.solution,
+          notes: res.initialNotes,
+          answer: res.answer,
+          answerLabel: getMiniAnswerLabel(res.answer),
           label: `Mini (${strategy}) difficulty ${miniDifficulty}/10 [functions] — ${countClues(res.initial)} clues`,
         });
       } else {
@@ -199,7 +223,7 @@ export default function DevSudokuPage() {
 
         <div className="mt-6">
           <p className="mb-2 text-sm font-medium text-foreground">
-            Mini (strategy-pure, 1–10 difficulty for naked/hidden single)
+            Mini (strategy-pure, 1–10 difficulty; pairs include pencil marks)
           </p>
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="text-sm text-muted-foreground">Difficulty:</span>
@@ -247,12 +271,44 @@ export default function DevSudokuPage() {
               <BoardGrid board={result.initial} label={result.label} />
               <BoardGrid board={result.solution} label="Solution" />
             </div>
+            {result.notes && (
+              <div>
+                <p className="mb-2 text-xs font-medium text-muted-foreground">
+                  Initial with notes
+                </p>
+                <StaticBoard
+                  board={result.initial}
+                  notes={result.notes}
+                  pairCells={getPairCells(result.answer)}
+                  strongNoteDigits={getStrongDigits(result.answer)}
+                />
+              </div>
+            )}
+            {result.answerLabel && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs">
+                <p className="font-medium text-foreground">Answer</p>
+                <p className="mt-1 font-mono text-muted-foreground">{result.answerLabel}</p>
+              </div>
+            )}
             <div className="rounded-lg border border-border bg-muted/30 p-3 font-mono text-xs">
               <p className="mb-2 text-muted-foreground">Initial (array):</p>
               <pre className="overflow-x-auto whitespace-pre">
                 {`[\n${result.initial.map((row) => `  [${row.join(",")}]`).join(",\n")}\n]`}
               </pre>
             </div>
+            {result.notes && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3 font-mono text-xs">
+                <p className="mb-2 text-muted-foreground">Initial Notes (array):</p>
+                <pre className="overflow-x-auto whitespace-pre">
+                  {`[\n${result.notes
+                    .map(
+                      (row) =>
+                        `  [${row.map((cell) => `[${cell.join(",")}]`).join(", ")}]`
+                    )
+                    .join(",\n")}\n]`}
+                </pre>
+              </div>
+            )}
           </div>
         )}
       </main>

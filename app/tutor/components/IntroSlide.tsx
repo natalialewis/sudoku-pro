@@ -22,13 +22,17 @@ const INTRO_CONTENT: Record<
   },
   naked_pair: {
     title: "Naked Pair",
-    what: "Coming soon.",
-    spot: "",
+    what:
+      "A naked pair is two cells in the same row, column, or box that together contain exactly the same two candidates. Those two digits cannot appear in any other empty cell in that unit.",
+    spot:
+      "Look for two empty cells in one row, column, or box whose notes are identical and list only two digits. Then you can remove those two digits from the notes in every other cell in that unit.",
   },
   hidden_pair: {
     title: "Hidden Pair",
-    what: "Coming soon.",
-    spot: "",
+    what:
+      "A hidden pair is two digits that, within one row, column, or box, can only go in two cells—even if those cells still show extra pencil marks.",
+    spot:
+      "Scan one unit for two digits that each appear as candidates only in the same two cells. Then remove every other candidate from those two cells.",
   },
 };
 

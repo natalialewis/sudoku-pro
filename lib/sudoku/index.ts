@@ -10,4 +10,6 @@ export {
   generateMiniBoardByStrategy,
   generateHiddenSingleBoard,
   generateNakedSingleBoard,
+  generateNakedPairBoard,
+  generateHiddenPairBoard,
 } from "./miniBoardGenerators";

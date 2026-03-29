@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import confetti from "canvas-confetti";
-import type { Board } from "@/lib/sudoku/types";
+import type { Board, Strategy } from "@/lib/sudoku/types";
 import {
   checkRowConstraint,
   checkColumnConstraint,
@@ -37,11 +37,15 @@ function constraintMessage(value: number, constraint: ConstraintType): string {
   }
 }
 
-function strategyMessage(
-  value: number,
-  strategy: "naked_single" | "hidden_single"
-): string {
-  const name = strategy === "naked_single" ? "Naked Single" : "Hidden Single";
+const STRATEGY_NAMES: Record<Strategy, string> = {
+  naked_single: "Naked Single",
+  hidden_single: "Hidden Single",
+  naked_pair: "Naked Pair",
+  hidden_pair: "Hidden Pair",
+};
+
+function strategyMessage(value: number, strategy: Strategy): string {
+  const name = STRATEGY_NAMES[strategy];
   return `You entered ${value}, but it's incorrect. Use the ${name} strategy to solve this cell.`;
 }
 
@@ -65,7 +69,7 @@ export function SolveCellQuestion({
   answerRow: number;
   answerCol: number;
   correctValue: number;
-  strategy: "naked_single" | "hidden_single";
+  strategy: Strategy;
   onResult: (correct: boolean) => void;
   onAdvance: () => void;
 }) {
@@ -125,7 +129,7 @@ export function SolveCellQuestion({
         next[answerRow][answerCol] = digit;
         return next;
       });
-      if (strat === "naked_single" || strat === "hidden_single") {
+      if (strat) {
         setBanner(strategyMessage(digit, strat));
       } else {
         setBanner(`You entered ${digit}, but it's incorrect.`);

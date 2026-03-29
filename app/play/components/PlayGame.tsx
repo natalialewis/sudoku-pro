@@ -5,7 +5,7 @@ import confetti from "canvas-confetti";
 import {
   type Board,
   type Difficulty,
-  generateFullBoard,
+  type PairHint,
   checkRowConstraint,
   checkColumnConstraint,
   checkBoxConstraint,
@@ -13,9 +13,13 @@ import {
   detectStrategyUsed,
   findFirstNakedSingle,
   findFirstHiddenSingle,
+  findFirstNakedPair,
+  findFirstHiddenPair,
   getBoxName,
   getBoxIndex,
 } from "@/lib/sudoku";
+import { fetchRandomFullBoard } from "@/lib/boards";
+import type { Strategy } from "@/lib/sudoku/types";
 
 type ConstraintType = "row" | "column" | "box";
 
@@ -54,11 +58,34 @@ function constraintMessage(
   }
 }
 
+const STRATEGY_NAMES: Record<Strategy, string> = {
+  naked_single: "Naked Single",
+  hidden_single: "Hidden Single",
+  naked_pair: "Naked Pair",
+  hidden_pair: "Hidden Pair",
+};
+
 // If the user didn't violate a constraint, but entered a value that is incorrect and there is a strategy that would fill that cell, return a message explaining what strategy to use.
-function strategyMessage(value: number, strategy: "naked_single" | "hidden_single"): string {
-  const name = strategy === "naked_single" ? "Naked Single" : "Hidden Single";
+function strategyMessage(value: number, strategy: Strategy): string {
+  const name = STRATEGY_NAMES[strategy];
   return `You entered ${value}, but it's incorrect. Use the ${name} strategy to solve this cell.`;
 }
+
+function formatUnit(h: PairHint["unit"]): string {
+  if (h.type === "row") return `row ${h.index + 1}`;
+  if (h.type === "col") return `column ${h.index + 1}`;
+  return `the ${getBoxName(h.index)} box`;
+}
+
+type HintTarget =
+  | {
+      kind: "single";
+      row: number;
+      col: number;
+      value: number;
+      strategy: "naked_single" | "hidden_single";
+    }
+  | { kind: "pair"; hint: PairHint };
 
 function boardsMatch(board: Board, solution: Board): boolean {
   for (let r = 0; r < 9; r++) {
@@ -96,13 +123,15 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
   const [banner, setBanner] = useState<{ message: string } | null>(null);
   const [hintTier, setHintTier] = useState(0);
   const [highlightedBox, setHighlightedBox] = useState<number | null>(null);
+  const [highlightPairCells, setHighlightPairCells] = useState<{ row: number; col: number }[] | null>(null);
   const [won, setWon] = useState(false);
+  const [boardError, setBoardError] = useState<string | null>(null);
   const confettiFiredRef = useRef(false);
-  const hintTargetRef = useRef<{ row: number; col: number; value: number; strategy: "naked_single" | "hidden_single" } | null>(null);
+  const hintTargetRef = useRef<HintTarget | null>(null);
 
   // Record lightweight BKT evidence in play mode for logged-in users.
   const recordPlayObservation = useCallback(
-    async (strategy: "naked_single" | "hidden_single", correct: boolean) => {
+    async (strategy: Strategy, correct: boolean) => {
       if (!isLoggedIn) return;
       try {
         await fetch("/api/bkt", {
@@ -121,31 +150,38 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
     [isLoggedIn]
   );
 
-  // Start a new game. Set all states to the initial values and generate a new puzzle.
+  // Load a puzzle from the database (boards table).
   const startNewGame = useCallback(async () => {
     setLoading(true);
+    setBoardError(null);
     setBanner(null);
     setSelectedCell(null);
     setCellError(null);
     setHighlightedBox(null);
+    setHighlightPairCells(null);
     setWon(false);
     confettiFiredRef.current = false;
     setUserCandidates({});
     setHintTier(0);
     hintTargetRef.current = null;
     try {
-      const { initial: init, solution: sol } = generateFullBoard(difficulty);
+      const { initial: init, solution: sol } = await fetchRandomFullBoard(difficulty);
       setInitial(init.map((r) => [...r]));
       setSolution(sol.map((r) => [...r]));
       setBoard(init.map((r) => [...r]));
+    } catch (e) {
+      setInitial(null);
+      setSolution(null);
+      setBoard(null);
+      setBoardError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
   }, [difficulty]);
 
   useEffect(() => {
-    startNewGame();
-  }, []);
+    void startNewGame();
+  }, [difficulty, startNewGame]);
 
   // Detect win: board matches solution.
   useEffect(() => {
@@ -199,6 +235,7 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
     clearWrongCell();
     setBanner(null);
     setHighlightedBox(null);
+    setHighlightPairCells(null);
   }, [clearWrongCell]);
 
   // Get a scaffolded hint when the user clicks the hint button.
@@ -207,39 +244,67 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
 
     const currentHint = hintTargetRef.current;
 
-    if (currentHint && hintTier < 3) {
-      setHintTier((t) => t + 1);
-      if (hintTier === 1) {
-        setBanner({
-          message: `There is a ${currentHint.strategy === "naked_single" ? "Naked Single" : "Hidden Single"} in the ${getBoxName(getBoxIndex(currentHint.row, currentHint.col))} box.`,
-        });
-      } else if (hintTier === 2) {
-        setBoard((prev) => {
-          if (!prev) return prev;
-          const next = prev.map((row) => [...row]);
-          next[currentHint.row][currentHint.col] = currentHint.value;
-          return next;
-        });
-        setUserCandidates((prev) => {
-          const key = cellKey(currentHint.row, currentHint.col);
-          const { [key]: _, ...rest } = prev;
-          return rest;
-        });
-        hintTargetRef.current = null;
-        setHintTier(0);
-        setSelectedCell({ row: currentHint.row, col: currentHint.col });
-        setHighlightedBox(getBoxIndex(currentHint.row, currentHint.col));
-        setBanner({
-          message: `The ${currentHint.value} is a ${currentHint.strategy === "naked_single" ? "Naked Single" : "Hidden Single"}.`,
-        });
+    if (currentHint && hintTier >= 1) {
+      if (currentHint.kind === "single") {
+        if (hintTier === 1) {
+          setHintTier(2);
+          setBanner({
+            message: `There is a ${currentHint.strategy === "naked_single" ? "Naked Single" : "Hidden Single"} in the ${getBoxName(getBoxIndex(currentHint.row, currentHint.col))} box.`,
+          });
+          return;
+        }
+        if (hintTier === 2) {
+          setBoard((prev) => {
+            if (!prev) return prev;
+            const next = prev.map((row) => [...row]);
+            next[currentHint.row][currentHint.col] = currentHint.value;
+            return next;
+          });
+          setUserCandidates((prev) => {
+            const key = cellKey(currentHint.row, currentHint.col);
+            const { [key]: _, ...rest } = prev;
+            return rest;
+          });
+          hintTargetRef.current = null;
+          setHintTier(0);
+          setSelectedCell({ row: currentHint.row, col: currentHint.col });
+          setHighlightedBox(getBoxIndex(currentHint.row, currentHint.col));
+          setBanner({
+            message: `The ${currentHint.value} is a ${currentHint.strategy === "naked_single" ? "Naked Single" : "Hidden Single"}.`,
+          });
+          return;
+        }
+      } else {
+        const { hint } = currentHint;
+        const pairName =
+          hint.strategy === "naked_pair" ? "Naked Pair" : "Hidden Pair";
+        if (hintTier === 1) {
+          setHintTier(2);
+          setHighlightedBox(
+            hint.unit.type === "box" ? hint.unit.index : getBoxIndex(hint.cells[0]!.row, hint.cells[0]!.col)
+          );
+          setBanner({
+            message: `There is a ${pairName} in ${formatUnit(hint.unit)} (digits ${hint.digits[0]} and ${hint.digits[1]}).`,
+          });
+          return;
+        }
+        if (hintTier === 2) {
+          setHighlightPairCells([...hint.cells]);
+          setHighlightedBox(null);
+          hintTargetRef.current = null;
+          setHintTier(0);
+          setBanner({
+            message: `The two highlighted cells form the ${pairName} on {${hint.digits[0]}, ${hint.digits[1]}}.`,
+          });
+          return;
+        }
       }
-      return;
     }
 
     // Find the first naked single on the board. Used to create a hint.
     const naked = findFirstNakedSingle(board);
     if (naked) {
-      hintTargetRef.current = naked;
+      hintTargetRef.current = { kind: "single", ...naked };
       setHintTier(1);
       setBanner({ message: "Look for a Naked Single." });
       return;
@@ -248,13 +313,29 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
     // Find the first hidden single on the board. Used to create a hint. These come after all naked singles are found.
     const hidden = findFirstHiddenSingle(board);
     if (hidden) {
-      hintTargetRef.current = hidden;
+      hintTargetRef.current = { kind: "single", ...hidden };
       setHintTier(1);
       setBanner({ message: "Look for a Hidden Single." });
       return;
     }
 
-    // If no naked or hidden singles are found, show the user the possible candidates for each empty cell as the bottom out hint.
+    const np = findFirstNakedPair(board);
+    if (np) {
+      hintTargetRef.current = { kind: "pair", hint: np };
+      setHintTier(1);
+      setBanner({ message: "Look for a Naked Pair." });
+      return;
+    }
+
+    const hp = findFirstHiddenPair(board);
+    if (hp) {
+      hintTargetRef.current = { kind: "pair", hint: hp };
+      setHintTier(1);
+      setBanner({ message: "Look for a Hidden Pair." });
+      return;
+    }
+
+    // If no learned pattern applies, show the user the possible candidates for each empty cell as the bottom out hint.
     const allCandidates = getAllCandidates(board);
     if (allCandidates.length > 0) {
       setUserCandidates((prev) => {
@@ -269,7 +350,8 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
         return next;
       });
       setBanner({
-        message: "None of the learned strategies apply. Showing possible candidates for each empty cell.",
+        message:
+          "No naked/hidden single or pair found with the current candidates. Showing possible candidates for each empty cell.",
       });
     } else {
       setBanner({ message: "The board is complete!" });
@@ -322,7 +404,7 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
         setBanner({
           message: constraintMessage(digit, constraint, row, col),
         });
-        if (strategyForCell === "naked_single" || strategyForCell === "hidden_single") {
+        if (strategyForCell) {
           void recordPlayObservation(strategyForCell, false);
         }
         return;
@@ -344,7 +426,9 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
         });
         setHintTier(0);
         hintTargetRef.current = null;
-        if (strategyForCell === "naked_single" || strategyForCell === "hidden_single") {
+        setHighlightPairCells(null);
+        setHighlightedBox(null);
+        if (strategyForCell) {
           void recordPlayObservation(strategyForCell, true);
         }
       } else {
@@ -355,13 +439,12 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
           next[row][col] = digit;
           return next;
         });
-        const strategy = strategyForCell;
-        if (strategy === "naked_single" || strategy === "hidden_single") {
-          void recordPlayObservation(strategy, false);
+        if (strategyForCell) {
+          void recordPlayObservation(strategyForCell, false);
         }
-        if (strategy === "naked_single" || strategy === "hidden_single") {
+        if (strategyForCell) {
           setBanner({
-            message: strategyMessage(digit, strategy),
+            message: strategyMessage(digit, strategyForCell),
           });
         } else {
           setBanner({
@@ -382,7 +465,24 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
   if (loading && !board) {
     return (
       <div className="mt-6 flex items-center justify-center py-12">
-        <p className="text-muted-foreground">Generating puzzle…</p>
+        <p className="text-muted-foreground">Loading puzzle…</p>
+      </div>
+    );
+  }
+
+  if (boardError && !board) {
+    return (
+      <div className="mt-6 space-y-3 rounded-lg border border-destructive/50 bg-card p-4">
+        <p className="text-sm text-destructive" role="alert">
+          {boardError}
+        </p>
+        <button
+          type="button"
+          onClick={() => void startNewGame()}
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -477,13 +577,17 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
               const inHighlightedBox =
                 highlightedBox != null &&
                 getBoxIndex(r, c) === highlightedBox;
+              const inPairHint =
+                highlightPairCells?.some((p) => p.row === r && p.col === c) ?? false;
               const candidates = userCandidates[cellKey(r, c)] ?? [];
               const borderRight = c === 2 || c === 5 ? "border-r-2 border-foreground/30" : "border-r border-border";
               const borderBottom = r === 2 || r === 5 ? "border-b-2 border-foreground/30" : "border-b border-border";
 
               let bg = "bg-card text-foreground";
               if (hasError) bg = "bg-destructive/30 ring-4 ring-destructive ring-inset";
-              else if (inHighlightedBox) bg = "bg-primary-muted/50 ring-2 ring-primary ring-inset";
+              else if (inPairHint) {
+                bg = "bg-purple-500/15 ring-2 ring-purple-600 ring-inset dark:ring-purple-400";
+              } else if (inHighlightedBox) bg = "bg-primary-muted/50 ring-2 ring-primary ring-inset";
               else if (selected) bg = "bg-primary/25 ring-2 ring-primary ring-inset";
 
               const textColor = userFilled ? "text-primary" : "";

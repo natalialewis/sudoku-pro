@@ -100,6 +100,129 @@ export function detectHiddenSingle(
  * Board state should be *before* the move (cell at (row, col) is empty).
  * Only naked and hidden single are supported for now. Naked pair and hidden pair will be implemented later.
  */
+/**
+ * True if (row,col) is one of two cells forming a naked pair in this unit:
+ * both have the same two candidates, and no other empty cell in the unit lists either digit.
+ */
+function cellInNakedPairInUnit(
+  board: Board,
+  unit: CellPos[],
+  row: number,
+  col: number
+): boolean {
+  if (board[row][col] !== 0) return false;
+  const empties = unit.filter(({ row: r, col: c }) => board[r][c] === 0);
+  for (let i = 0; i < empties.length; i++) {
+    for (let j = i + 1; j < empties.length; j++) {
+      const a = empties[i]!;
+      const b = empties[j]!;
+      const ca = getCandidates(board, a.row, a.col);
+      const cb = getCandidates(board, b.row, b.col);
+      if (ca.length !== 2 || cb.length !== 2) continue;
+      if (ca[0] !== cb[0] || ca[1] !== cb[1]) continue;
+      const d1 = ca[0]!;
+      const d2 = ca[1]!;
+      let ok = true;
+      for (const e of empties) {
+        if (
+          (e.row === a.row && e.col === a.col) ||
+          (e.row === b.row && e.col === b.col)
+        ) {
+          continue;
+        }
+        const cs = getCandidates(board, e.row, e.col);
+        if (cs.includes(d1) || cs.includes(d2)) {
+          ok = false;
+          break;
+        }
+      }
+      if (!ok) continue;
+      if (
+        (row === a.row && col === a.col) ||
+        (row === b.row && col === b.col)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * True if (row,col) is one of two cells forming a hidden pair on digits d1,d2 in this unit.
+ */
+function cellInHiddenPairInUnit(
+  board: Board,
+  unit: CellPos[],
+  row: number,
+  col: number
+): boolean {
+  if (board[row][col] !== 0) return false;
+  const empties = unit.filter(({ row: r, col: c }) => board[r][c] === 0);
+  for (let i = 0; i < empties.length; i++) {
+    for (let j = i + 1; j < empties.length; j++) {
+      const a = empties[i]!;
+      const b = empties[j]!;
+      const ca = getCandidates(board, a.row, a.col);
+      const cb = getCandidates(board, b.row, b.col);
+      if (ca.length < 2 || cb.length < 2) continue;
+
+      for (let d1 = 1; d1 <= 9; d1++) {
+        for (let d2 = d1 + 1; d2 <= 9; d2++) {
+          if (!ca.includes(d1) || !ca.includes(d2) || !cb.includes(d1) || !cb.includes(d2)) {
+            continue;
+          }
+          // Not a naked pair (same two-only lists)
+          if (
+            ca.length === 2 &&
+            cb.length === 2 &&
+            ca[0] === cb[0] &&
+            ca[1] === cb[1]
+          ) {
+            continue;
+          }
+          let ok = true;
+          for (const e of empties) {
+            if (
+              (e.row === a.row && e.col === a.col) ||
+              (e.row === b.row && e.col === b.col)
+            ) {
+              continue;
+            }
+            const cs = getCandidates(board, e.row, e.col);
+            if (cs.includes(d1) || cs.includes(d2)) {
+              ok = false;
+              break;
+            }
+          }
+          if (!ok) continue;
+          if (
+            (row === a.row && col === a.col) ||
+            (row === b.row && col === b.col)
+          ) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function cellInNakedPair(board: Board, row: number, col: number): boolean {
+  for (const unit of getUnitsContaining(row, col)) {
+    if (cellInNakedPairInUnit(board, unit, row, col)) return true;
+  }
+  return false;
+}
+
+function cellInHiddenPair(board: Board, row: number, col: number): boolean {
+  for (const unit of getUnitsContaining(row, col)) {
+    if (cellInHiddenPairInUnit(board, unit, row, col)) return true;
+  }
+  return false;
+}
+
 export function detectStrategyUsed(
   board: Board,
   row: number,
@@ -111,6 +234,8 @@ export function detectStrategyUsed(
 
   if (detectNakedSingle(board, row, col)) return "naked_single";
   if (detectHiddenSingle(board, row, col, value)) return "hidden_single";
+  if (cellInNakedPair(board, row, col)) return "naked_pair";
+  if (cellInHiddenPair(board, row, col)) return "hidden_pair";
 
   return null;
 }

@@ -1,13 +1,33 @@
 import type { Board } from "./types";
 import type { Strategy } from "./types";
+import type { UnitType } from "./types";
 import { BOARD_SIZE, BOX_SIZE } from "./types";
 import { getBoxIndex, isValidMove } from "./constraints";
+import { getAllCandidates, getCandidates } from "./candidates";
 
 export type MiniBoardDifficulty = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
+export type NotesGrid = number[][][];
+
+export interface MiniSingleAnswer {
+  kind: "single";
+  row: number;
+  col: number;
+  value: number;
+}
+
+export interface MiniPairAnswer {
+  kind: "pair";
+  cells: [{ row: number; col: number }, { row: number; col: number }];
+  digits: [number, number];
+  unit: { type: UnitType; index: number };
+}
+
 export interface MiniBoardResult {
   initial: Board;
-  answer: { row: number; col: number; value: number };
+  solution: Board;
+  initialNotes?: NotesGrid;
+  answer: MiniSingleAnswer | MiniPairAnswer;
 }
 
 const MAX_GENERATOR_ATTEMPTS = 100;
@@ -34,6 +54,12 @@ function getColCells(col: number): [number, number][] {
   return Array.from({ length: BOARD_SIZE }, (_, r) => [r, col]);
 }
 
+function getUnitCells(unitType: UnitType, index: number): [number, number][] {
+  if (unitType === "row") return getRowCells(index);
+  if (unitType === "col") return getColCells(index);
+  return getBoxCells(index);
+}
+
 function shuffle<T>(arr: T[]): void {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -47,6 +73,26 @@ function pickRandom<T>(arr: T[]): T {
 
 function canPlace(board: Board, row: number, col: number, value: number): boolean {
   return isValidMove(board, row, col, value);
+}
+
+function cloneBoard(board: Board): Board {
+  return board.map((row) => [...row]);
+}
+
+function createNotesGrid(board: Board): NotesGrid {
+  const notes: NotesGrid = Array.from({ length: BOARD_SIZE }, () =>
+    Array.from({ length: BOARD_SIZE }, () => [] as number[])
+  );
+  for (const { row, col, candidates } of getAllCandidates(board)) {
+    notes[row][col] = [...candidates];
+  }
+  return notes;
+}
+
+function countDistractorsForDifficulty(difficulty: MiniBoardDifficulty): number {
+  if (difficulty <= 3) return Math.floor(Math.random() * 6);
+  if (difficulty <= 7) return 10 + Math.floor(Math.random() * 6);
+  return 20 + Math.floor(Math.random() * 11);
 }
 
 function generateSolvedGrid(): Board {
@@ -183,7 +229,8 @@ export function generateHiddenSingleBoard(difficulty: MiniBoardDifficulty): Mini
 
   return {
     initial: initial.map((row) => [...row]),
-    answer: { row: tR, col: tC, value: D },
+    solution: cloneBoard(solved),
+    answer: { kind: "single", row: tR, col: tC, value: D },
   };
 }
 
@@ -285,14 +332,226 @@ export function generateNakedSingleBoard(difficulty: MiniBoardDifficulty): MiniB
 
     return {
       initial: initial.map((row) => [...row]),
-      answer: { row: tR, col: tC, value: answerValue },
+      solution: cloneBoard(solved),
+      answer: { kind: "single", row: tR, col: tC, value: answerValue },
     };
   }
   throw new Error("Failed to generate Naked Single board after max attempts");
 }
 
 // ---------------------------------------------------------------------------
-// Strategy dispatcher (naked_single and hidden_single only)
+// 3. Naked Pair Generator (top-down masking + candidate validation)
+// ---------------------------------------------------------------------------
+
+export function generateNakedPairBoard(difficulty: MiniBoardDifficulty): MiniBoardResult {
+  for (let attempt = 0; attempt < MAX_GENERATOR_ATTEMPTS * 4; attempt++) {
+    const solved = generateSolvedGrid();
+    const unitType = pickRandom<UnitType>(["row", "col", "box"]);
+    const unitIndex = Math.floor(Math.random() * BOARD_SIZE);
+    const unitCells = getUnitCells(unitType, unitIndex);
+    const pair = [...unitCells];
+    shuffle(pair);
+    const [aR, aC] = pair[0]!;
+    const [bR, bC] = pair[1]!;
+
+    const initial = cloneBoard(solved);
+    initial[aR][aC] = 0;
+    initial[bR][bC] = 0;
+
+    // Keep additional empties in the same unit so the pair is visible in context.
+    const remainingUnit = unitCells.filter(
+      ([r, c]) => !(r === aR && c === aC) && !(r === bR && c === bC)
+    );
+    shuffle(remainingUnit);
+    const extraInUnit = Math.min(
+      remainingUnit.length,
+      1 + Math.floor(difficulty / 3) + Math.floor(Math.random() * 2)
+    );
+    for (let i = 0; i < extraInUnit; i++) {
+      const [r, c] = remainingUnit[i]!;
+      initial[r][c] = 0;
+    }
+
+    // Add organic distractors outside the target unit.
+    const distractorPool: [number, number][] = [];
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (initial[r][c] === 0) continue;
+        if (
+          (unitType === "row" && r === unitIndex) ||
+          (unitType === "col" && c === unitIndex) ||
+          (unitType === "box" && getBoxIndex(r, c) === unitIndex)
+        ) {
+          continue;
+        }
+        distractorPool.push([r, c]);
+      }
+    }
+    shuffle(distractorPool);
+    const numDistractors = Math.min(countDistractorsForDifficulty(difficulty), distractorPool.length);
+    for (let i = 0; i < numDistractors; i++) {
+      const [r, c] = distractorPool[i]!;
+      initial[r][c] = 0;
+    }
+
+    const candA = getCandidates(initial, aR, aC);
+    const candB = getCandidates(initial, bR, bC);
+    if (candA.length !== 2 || candB.length !== 2) continue;
+    if (candA[0] !== candB[0] || candA[1] !== candB[1]) continue;
+    const digits = [candA[0], candA[1]] as [number, number];
+
+    // Ensure no other empty cell in unit can take either pair digit.
+    let invalid = false;
+    for (const [r, c] of unitCells) {
+      if ((r === aR && c === aC) || (r === bR && c === bC)) continue;
+      if (initial[r][c] !== 0) continue;
+      const cs = getCandidates(initial, r, c);
+      if (cs.includes(digits[0]) || cs.includes(digits[1])) {
+        invalid = true;
+        break;
+      }
+    }
+    if (invalid) continue;
+
+    return {
+      initial: cloneBoard(initial),
+      solution: cloneBoard(solved),
+      initialNotes: createNotesGrid(initial),
+      answer: {
+        kind: "pair",
+        cells: [
+          { row: aR, col: aC },
+          { row: bR, col: bC },
+        ],
+        digits,
+        unit: { type: unitType, index: unitIndex },
+      },
+    };
+  }
+  throw new Error("Failed to generate Naked Pair board after max attempts");
+}
+
+// ---------------------------------------------------------------------------
+// 4. Hidden Pair Generator (top-down masking + candidate validation)
+// ---------------------------------------------------------------------------
+
+export function generateHiddenPairBoard(difficulty: MiniBoardDifficulty): MiniBoardResult {
+  for (let attempt = 0; attempt < MAX_GENERATOR_ATTEMPTS * 6; attempt++) {
+    const solved = generateSolvedGrid();
+    const unitType = pickRandom<UnitType>(["row", "col", "box"]);
+    const unitIndex = Math.floor(Math.random() * BOARD_SIZE);
+    const unitCells = getUnitCells(unitType, unitIndex);
+    const pair = [...unitCells];
+    shuffle(pair);
+    const [aR, aC] = pair[0]!;
+    const [bR, bC] = pair[1]!;
+
+    const targetDigits = [solved[aR][aC], solved[bR][bC]].sort((x, y) => x - y) as [number, number];
+    if (targetDigits[0] === targetDigits[1]) continue;
+
+    const initial = cloneBoard(solved);
+    initial[aR][aC] = 0;
+    initial[bR][bC] = 0;
+
+    const remainingUnit = unitCells.filter(
+      ([r, c]) => !(r === aR && c === aC) && !(r === bR && c === bC)
+    );
+    shuffle(remainingUnit);
+    const extraInUnit = Math.min(
+      remainingUnit.length,
+      2 + Math.floor(difficulty / 3) + Math.floor(Math.random() * 2)
+    );
+    for (let i = 0; i < extraInUnit; i++) {
+      const [r, c] = remainingUnit[i]!;
+      initial[r][c] = 0;
+    }
+
+    // More surrounding empties to encourage extra candidates in the pair cells.
+    const neighborPool: [number, number][] = [];
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (initial[r][c] === 0) continue;
+        const sharesA = r === aR || c === aC || getBoxIndex(r, c) === getBoxIndex(aR, aC);
+        const sharesB = r === bR || c === bC || getBoxIndex(r, c) === getBoxIndex(bR, bC);
+        if (!sharesA && !sharesB) continue;
+        if (
+          (unitType === "row" && r === unitIndex) ||
+          (unitType === "col" && c === unitIndex) ||
+          (unitType === "box" && getBoxIndex(r, c) === unitIndex)
+        ) {
+          continue;
+        }
+        neighborPool.push([r, c]);
+      }
+    }
+    shuffle(neighborPool);
+    const neighborRemovals = Math.min(
+      Math.floor(difficulty / 2) + 3 + Math.floor(Math.random() * 3),
+      neighborPool.length
+    );
+    for (let i = 0; i < neighborRemovals; i++) {
+      const [r, c] = neighborPool[i]!;
+      initial[r][c] = 0;
+    }
+
+    // Organic distractors anywhere else.
+    const distractorPool: [number, number][] = [];
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (initial[r][c] !== 0) distractorPool.push([r, c]);
+      }
+    }
+    shuffle(distractorPool);
+    const numDistractors = Math.min(Math.floor(countDistractorsForDifficulty(difficulty) / 2), distractorPool.length);
+    for (let i = 0; i < numDistractors; i++) {
+      const [r, c] = distractorPool[i]!;
+      initial[r][c] = 0;
+    }
+
+    const candA = getCandidates(initial, aR, aC);
+    const candB = getCandidates(initial, bR, bC);
+    if (!candA.includes(targetDigits[0]) || !candA.includes(targetDigits[1])) continue;
+    if (!candB.includes(targetDigits[0]) || !candB.includes(targetDigits[1])) continue;
+    if (candA.length <= 2 && candB.length <= 2) continue; // avoid collapsing into naked pair
+
+    let countD1 = 0;
+    let countD2 = 0;
+    let onlyPairCellsForDigits = true;
+    for (const [r, c] of unitCells) {
+      if (initial[r][c] !== 0) continue;
+      const cs = getCandidates(initial, r, c);
+      if (cs.includes(targetDigits[0])) {
+        countD1++;
+        if (!((r === aR && c === aC) || (r === bR && c === bC))) onlyPairCellsForDigits = false;
+      }
+      if (cs.includes(targetDigits[1])) {
+        countD2++;
+        if (!((r === aR && c === aC) || (r === bR && c === bC))) onlyPairCellsForDigits = false;
+      }
+    }
+    if (!onlyPairCellsForDigits) continue;
+    if (countD1 !== 2 || countD2 !== 2) continue;
+
+    return {
+      initial: cloneBoard(initial),
+      solution: cloneBoard(solved),
+      initialNotes: createNotesGrid(initial),
+      answer: {
+        kind: "pair",
+        cells: [
+          { row: aR, col: aC },
+          { row: bR, col: bC },
+        ],
+        digits: targetDigits,
+        unit: { type: unitType, index: unitIndex },
+      },
+    };
+  }
+  throw new Error("Failed to generate Hidden Pair board after max attempts");
+}
+
+// ---------------------------------------------------------------------------
+// Strategy dispatcher
 // ---------------------------------------------------------------------------
 
 export function generateMiniBoardByStrategy(
@@ -306,8 +565,9 @@ export function generateMiniBoardByStrategy(
     case "hidden_single":
       return generateHiddenSingleBoard(d);
     case "naked_pair":
+      return generateNakedPairBoard(d);
     case "hidden_pair":
-      throw new Error(`Mini board generation for "${strategy}" is not implemented yet.`);
+      return generateHiddenPairBoard(d);
     default:
       throw new Error(`Unknown strategy: ${strategy}`);
   }

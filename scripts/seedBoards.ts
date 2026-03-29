@@ -42,8 +42,8 @@ const COUNT_CONFIG = {
   mini: {
     naked_single: { 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 5, 8: 5, 9: 5, 10: 5 },
     hidden_single: { 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 5, 8: 5, 9: 5, 10: 5 },
-    naked_pair: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0 },
-    hidden_pair: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0 },
+    naked_pair: { 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 5, 8: 5, 9: 5, 10: 5 },
+    hidden_pair: { 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 5, 8: 5, 9: 5, 10: 5 },
   },
 };
 
@@ -96,15 +96,15 @@ async function seedMiniBoards() {
             strategy,
             level as MiniBoardDifficulty
           );
-          const solution: Board = res.initial.map((row) => [...row]);
-          solution[res.answer.row][res.answer.col] = res.answer.value;
           const { error } = await supabase.from("boards").insert({
             board_type: "mini",
             difficulty: null,
             strategy_focus: strategy,
             difficulty_level: level,
             initial_state: boardToJsonb(res.initial),
-            solution: boardToJsonb(solution),
+            solution: boardToJsonb(res.solution),
+            initial_notes: res.initialNotes ?? null,
+            mini_answer: res.answer,
           });
           if (error) {
             console.error(`Mini ${strategy} L${level} #${i + 1}:`, error.message);
