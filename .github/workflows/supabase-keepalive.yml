@@ -1,0 +1,21 @@
+# Daily ping to reduce free-tier Supabase pauses from inactivity.
+# Add repo secret SUPABASE_PROJECT_REF (Dashboard → Project Settings → General → Reference ID).
+
+name: Supabase keepalive
+
+on:
+  schedule:
+    - cron: "42 15 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Auth /health
+        env:
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          curl -fsS "https://${SUPABASE_PROJECT_REF}.supabase.co/auth/v1/health" | head -c 300
+          echo
