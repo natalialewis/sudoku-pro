@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import confetti from "canvas-confetti";
 import type { Board, Strategy } from "@/lib/sudoku/types";
 import {
@@ -9,6 +9,10 @@ import {
   constraintViolationMessage,
   STRATEGY_LABELS,
 } from "@/lib/sudoku";
+import {
+  DigitCaptureInput,
+  shouldIgnoreGlobalSudokuDigitKey,
+} from "@/components/ui/DigitCaptureInput";
 
 function strategyMessage(value: number, strategy: Strategy): string {
   const name = STRATEGY_LABELS[strategy];
@@ -44,6 +48,7 @@ export function SolveCellQuestion({
   const [resultRecorded, setResultRecorded] = useState(false);
   const [correct, setCorrect] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
+  const digitInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!showCelebration) return;
@@ -51,13 +56,9 @@ export function SolveCellQuestion({
     return () => clearTimeout(t);
   }, [showCelebration]);
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (banner) return;
-      const digit = /^[1-9]$/.test(e.key) ? parseInt(e.key, 10) : null;
-      if (!digit) return;
-
-      e.preventDefault();
+  const applyDigit = useCallback(
+    (digit: number) => {
+      if (banner || digit < 1 || digit > 9) return;
 
       const constraint = getViolatedConstraint(board, answerRow, answerCol, digit);
       if (constraint) {
@@ -105,13 +106,19 @@ export function SolveCellQuestion({
         onResult(false);
       }
     },
-    [board, answerRow, answerCol, correctValue, strategy, banner, resultRecorded, onResult]
+    [board, answerRow, answerCol, correctValue, banner, resultRecorded, onResult]
   );
 
   useEffect(() => {
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleKeyDown]);
+    const onKey = (e: KeyboardEvent) => {
+      if (!/^[1-9]$/.test(e.key)) return;
+      if (shouldIgnoreGlobalSudokuDigitKey(e, digitInputRef.current)) return;
+      e.preventDefault();
+      applyDigit(parseInt(e.key, 10));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [applyDigit]);
 
   return (
     <div className="relative space-y-4">
@@ -129,8 +136,13 @@ export function SolveCellQuestion({
           </div>
         </div>
       )}
+      <DigitCaptureInput
+        ref={digitInputRef}
+        onDigit={applyDigit}
+        disabled={!!banner || correct}
+      />
       <p className="text-sm text-muted-foreground">
-        Fill in the highlighted cell. Type a number 1–9.
+        Type 1–9 (desktop). On phones, tap the highlighted cell first to open the number keyboard.
       </p>
       <div className="flex justify-center">
         <div className="inline-grid w-fit grid-cols-9 border-2 border-foreground/20 bg-card rounded-lg overflow-hidden shadow-sm">
@@ -144,12 +156,25 @@ export function SolveCellQuestion({
               if (hasError) bg = "bg-destructive/30 ring-4 ring-destructive ring-inset";
               else if (isTarget) bg = "bg-primary/25 ring-2 ring-primary ring-inset";
 
+              if (isTarget) {
+                return (
+                  <button
+                    key={`${r}-${c}`}
+                    type="button"
+                    disabled={!!banner || correct}
+                    aria-label="Open number keyboard for this cell"
+                    onClick={() => digitInputRef.current?.focus()}
+                    className={`flex h-10 w-10 min-h-10 min-w-10 items-center justify-center border-border text-sm tabular-nums ${borderRight} ${borderBottom} ${bg} font-semibold disabled:cursor-default`}
+                  >
+                    {val === 0 ? "" : val}
+                  </button>
+                );
+              }
+
               return (
                 <div
                   key={`${r}-${c}`}
-                  className={`flex h-10 w-10 min-h-10 min-w-10 items-center justify-center border-border text-sm tabular-nums ${borderRight} ${borderBottom} ${bg} ${
-                    isTarget ? "font-semibold" : ""
-                  } ${isTarget ? "" : "cursor-default"}`}
+                  className={`flex h-10 w-10 min-h-10 min-w-10 items-center justify-center border-border text-sm tabular-nums ${borderRight} ${borderBottom} ${bg} cursor-default`}
                 >
                   {val === 0 ? "" : val}
                 </div>
@@ -170,6 +195,7 @@ export function SolveCellQuestion({
                 next[answerRow][answerCol] = 0;
                 return next;
               });
+              requestAnimationFrame(() => digitInputRef.current?.focus());
             }}
             className="mt-3 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
           >

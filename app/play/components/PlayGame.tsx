@@ -20,6 +20,10 @@ import {
 } from "@/lib/sudoku";
 import { fetchRandomFullBoard } from "@/lib/boards";
 import type { Strategy } from "@/lib/sudoku/types";
+import {
+  DigitCaptureInput,
+  shouldIgnoreGlobalSudokuDigitKey,
+} from "@/components/ui/DigitCaptureInput";
 
 // If the user didn't violate a constraint, but entered a value that is incorrect and there is a strategy that would fill that cell, return a message explaining what strategy to use.
 function strategyMessage(value: number, strategy: Strategy): string {
@@ -84,6 +88,7 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
   const [boardError, setBoardError] = useState<string | null>(null);
   const confettiFiredRef = useRef(false);
   const hintTargetRef = useRef<HintTarget | null>(null);
+  const digitInputRef = useRef<HTMLInputElement>(null);
 
   // Record lightweight BKT evidence in play mode for logged-in users.
   const recordPlayObservation = useCallback(
@@ -170,6 +175,7 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
     if (!board || isLocked(r, c)) return;
     setSelectedCell({ row: r, col: c });
     setCellError(null);
+    digitInputRef.current?.focus();
   };
 
   // Clear the wrong cell when the user dismisses the banner.
@@ -192,6 +198,7 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
     setBanner(null);
     setHighlightedBox(null);
     setHighlightPairCells(null);
+    requestAnimationFrame(() => digitInputRef.current?.focus());
   }, [clearWrongCell]);
 
   // Get a scaffolded hint when the user clicks the hint button.
@@ -314,22 +321,16 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
     }
   }, [board, solution, hintTier]);
 
-  // If the user presses a digit key, enter the digit into the selected cell.
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
+  const applyDigit = useCallback(
+    (digit: number) => {
       if (!board || !solution) return;
       if (banner) return;
-
-      // Must be between 1 and 9.
-      const digit = /^[1-9]$/.test(e.key) ? parseInt(e.key, 10) : null;
-      if (!digit || !selectedCell) return;
+      if (digit < 1 || digit > 9) return;
+      if (!selectedCell) return;
 
       const { row, col } = selectedCell;
       if (isLocked(row, col)) return;
 
-      e.preventDefault();
-
-      // If the user is in candidates mode, add the digit to the user's candidates for the selected cell. (Notes)
       if (candidatesMode) {
         setUserCandidates((prev) => {
           const key = cellKey(row, col);
@@ -347,7 +348,6 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
       boardBeforeMove[row][col] = 0;
       const strategyForCell = detectStrategyUsed(boardBeforeMove, row, col, solution[row][col]);
 
-      // If the user entered a value that violates a constraint (Sudoku rule), show a banner explaining the constraint violation.
       const constraint = getViolatedConstraint(board, row, col, digit);
       if (constraint) {
         setCellError({ row, col });
@@ -366,7 +366,6 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
         return;
       }
 
-      // If the user entered the correct value, set the cell to the correct value and clear the banner. Else, show a banner explaining the incorrect value.
       const correct = solution[row][col];
       if (digit === correct) {
         setBoard((prev) => {
@@ -413,9 +412,15 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
   );
 
   useEffect(() => {
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleKeyDown]);
+    const onKey = (e: KeyboardEvent) => {
+      if (!/^[1-9]$/.test(e.key)) return;
+      if (shouldIgnoreGlobalSudokuDigitKey(e, digitInputRef.current)) return;
+      e.preventDefault();
+      applyDigit(parseInt(e.key, 10));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [applyDigit]);
 
   // Loading display
   if (loading && !board) {
@@ -447,8 +452,18 @@ export function PlayGame({ isLoggedIn = false }: PlayGameProps) {
     return null;
   }
 
+  const digitInputDisabled =
+    won ||
+    !selectedCell ||
+    !!banner ||
+    isLocked(selectedCell.row, selectedCell.col);
+
   return (
     <div className="mt-6 space-y-6">
+      <DigitCaptureInput ref={digitInputRef} onDigit={applyDigit} disabled={digitInputDisabled} />
+      <p className="text-center text-xs text-muted-foreground md:hidden">
+        Tap an empty cell to open the number keyboard (answers and notes).
+      </p>
       <div className="flex flex-wrap items-center justify-center gap-3">
         <span className="text-sm font-medium text-foreground">Difficulty:</span>
         <div className="flex rounded-lg border border-border p-0.5">
