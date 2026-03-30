@@ -15,7 +15,11 @@ jobs:
       - name: Ping Auth /health
         env:
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           set -euo pipefail
-          curl -fsS "https://${SUPABASE_PROJECT_REF}.supabase.co/auth/v1/health" | head -c 300
+          curl -fsS "https://${SUPABASE_PROJECT_REF}.supabase.co/auth/v1/health" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            | head -c 300
           echo
